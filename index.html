@@ -229,7 +229,7 @@
   .chev{width:18px;height:18px;color:var(--text-faint);transition:transform .2s;flex-shrink:0;}
   .day-card.open .chev{transform:rotate(180deg);}
   .day-body{max-height:0;overflow:hidden;transition:max-height .25s ease;}
-  .day-card.open .day-body{max-height:600px;}
+  .day-card.open .day-body{max-height:2400px;}
   .day-body-inner{padding:0 1rem 1rem;}
   .ex-list{list-style:none;margin:0;padding:0;}
   .ex-list li{
@@ -265,6 +265,75 @@
   .delta.up{color:var(--fat);}
   .delta.down{color:var(--accent);}
   .empty-hint{color:var(--text-dim);font-size:.85rem;text-align:center;padding:1.5rem 0;}
+
+  /* ---- Edit mode controls ---- */
+  .page-head-row{display:flex;justify-content:space-between;align-items:center;gap:.75rem;margin-bottom:.25rem;}
+  .page-head-row .page-title{margin-bottom:0;}
+  .edit-toggle-btn{
+    background:var(--card);border:1px solid var(--border);color:var(--accent);
+    font-family:inherit;font-weight:700;font-size:.78rem;padding:.45rem .9rem;border-radius:10px;
+    display:flex;align-items:center;gap:.35rem;flex-shrink:0;
+  }
+  .edit-toggle-btn svg{width:14px;height:14px;}
+  .edit-toggle-btn.active{background:var(--accent);color:#062019;border-color:var(--accent);}
+
+  .field-input{
+    width:100%;background:#0D0F17;border:1px solid var(--border);color:var(--text);
+    font-family:inherit;font-size:.85rem;padding:.55rem .65rem;border-radius:10px;min-width:0;
+  }
+  .field-input:focus{outline:none;border-color:var(--accent);}
+  .field-row{display:flex;gap:.5rem;margin-bottom:.6rem;}
+  .field-row .field-input{flex:1;min-width:0;}
+
+  .macro-edit-row{display:flex;gap:.5rem;}
+  .macro-edit{flex:1;}
+  .macro-edit label{display:block;font-size:.62rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-bottom:.25rem;}
+  .macro-edit input{
+    width:100%;background:#0D0F17;border:1px solid var(--border);color:var(--text);
+    font-family:inherit;font-size:.9rem;font-weight:700;padding:.5rem;border-radius:8px;text-align:center;
+  }
+  .macro-edit input:focus{outline:none;border-color:var(--accent);}
+
+  .edit-line{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;}
+  .edit-line .field-input{flex:1;min-width:0;}
+  .remove-line-btn{
+    width:30px;height:30px;flex-shrink:0;border-radius:8px;
+    background:#FF6B6B1A;color:var(--danger);border:1px solid #FF6B6B33;
+    font-size:1.05rem;font-weight:700;line-height:1;display:flex;align-items:center;justify-content:center;
+  }
+  .add-line-btn{
+    width:100%;background:none;border:1px dashed var(--border);color:var(--text-dim);
+    font-family:inherit;font-weight:700;font-size:.82rem;padding:.55rem;border-radius:10px;margin-top:.1rem;margin-bottom:.6rem;
+  }
+
+  .ex-edit-row{display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center;}
+  .ex-edit-row .field-input{flex:1;min-width:0;}
+  .ex-edit-row .field-input.scheme-input{flex:0 0 6.5rem;}
+
+  /* ---- Exercise set tracking ---- */
+  .ex-block{padding:.7rem 0;border-bottom:1px solid var(--border);}
+  .ex-block:last-child{border-bottom:none;}
+  .ex-row-head{display:flex;justify-content:space-between;gap:.6rem;font-size:.83rem;}
+  .ex-row-head .ex-name{color:var(--text);font-weight:600;}
+  .ex-row-head .ex-scheme{color:var(--text-dim);font-size:.76rem;white-space:nowrap;flex-shrink:0;}
+  .ex-last{color:var(--text-faint);font-size:.72rem;margin-top:.3rem;}
+  .set-rows{margin-top:.55rem;display:flex;flex-direction:column;gap:.4rem;}
+  .set-row{display:flex;align-items:center;gap:.4rem;}
+  .set-idx{width:1.1rem;font-size:.72rem;color:var(--text-faint);flex-shrink:0;text-align:center;}
+  .set-input{
+    flex:1;min-width:0;background:#0D0F17;border:1px solid var(--border);color:var(--text);
+    font-family:inherit;font-size:.82rem;font-weight:600;padding:.45rem .5rem;border-radius:8px;text-align:center;
+  }
+  .set-input:focus{outline:none;border-color:var(--accent);}
+  .set-x{color:var(--text-faint);font-size:.72rem;flex-shrink:0;}
+  .set-remove-btn{
+    width:24px;height:24px;flex-shrink:0;border-radius:7px;background:none;border:none;
+    color:var(--text-faint);font-size:1rem;line-height:1;display:flex;align-items:center;justify-content:center;
+  }
+  .add-set-btn{
+    align-self:flex-start;background:none;border:1px dashed var(--border);color:var(--text-dim);
+    font-family:inherit;font-weight:700;font-size:.75rem;padding:.35rem .7rem;border-radius:8px;
+  }
 </style>
 </head>
 <body>
@@ -296,9 +365,9 @@
 
   /* ===================== DATA ===================== */
 
-  var TARGETS = { kcal: 2100, p: 222, c: 150, f: 70 };
+  var DEFAULT_TARGETS = { kcal: 2100, p: 222, c: 150, f: 70 };
 
-  var MEALS = [
+  var DEFAULT_MEALS = [
     { id:1, name:"Meal 1", sub:"Breakfast",
       items:["180g egg whites","90g whole eggs (~2 eggs)","40g dry oats","100g blueberries","16g peanut butter"],
       p:45, c:45, f:20 },
@@ -321,7 +390,7 @@
 
   function mealKcal(m){ return m.p*4 + m.c*4 + m.f*9; }
 
-  var TRAINING = [
+  var DEFAULT_TRAINING = [
     { day:1, title:"Day 1 — Push", focus:"Chest / Shoulders / Triceps", rest:false, ex:[
       ["Barbell Bench Press","4 x 6-8"],
       ["Incline DB Press","3 x 8-10"],
@@ -377,7 +446,7 @@
     ]}
   ];
 
-  var TRAINING_NOTES = [
+  var DEFAULT_NOTES = [
     "Push last set of most exercises to rest-pause (mini-sets of 3-5 reps after a 15-20s pause) or partial reps to extend past failure.",
     "Cardio: 30–45 minutes, 4–5x per week, in addition to lifting days.",
     "Steps: aim for 10,000 steps every day, including rest days."
@@ -393,6 +462,8 @@
 
   var STORE_KEY = "fittrack.state.v1";
 
+  function clone(x){ return JSON.parse(JSON.stringify(x)); }
+
   function todayStr(){
     var d = new Date();
     var tzOff = d.getTimezoneOffset()*60000;
@@ -400,12 +471,20 @@
   }
 
   function loadState(){
+    var s = null;
     var raw = localStorage.getItem(STORE_KEY);
     if(raw){
-      try{ return JSON.parse(raw); }catch(e){ /* fall through to fresh state */ }
+      try{ s = JSON.parse(raw); }catch(e){ s = null; }
     }
-    var weights = SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; });
-    return { daily:{}, weights: weights };
+    if(!s) s = {};
+    if(!s.daily) s.daily = {};
+    if(!s.weights) s.weights = SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; });
+    if(!s.meals) s.meals = clone(DEFAULT_MEALS);
+    if(!s.training) s.training = clone(DEFAULT_TRAINING);
+    if(!s.targets) s.targets = clone(DEFAULT_TARGETS);
+    if(!s.notes) s.notes = clone(DEFAULT_NOTES);
+    if(!s.exerciseLog) s.exerciseLog = {};
+    return s;
   }
 
   var state = loadState();
@@ -434,12 +513,27 @@
   /* ===================== HELPERS ===================== */
 
   function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
+  function clampInt(n,a,b){ return Math.max(a, Math.min(b, Math.round(n))); }
   function round1(n){ return Math.round(n*10)/10; }
-  function esc(s){ return String(s).replace(/[&<>]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; }); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; }); }
+  function escAttr(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
   function fmtDate(dateStr){
     var parts = dateStr.split("-");
     var d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
     return d.toLocaleDateString(undefined, {month:"short", day:"numeric"});
+  }
+
+  var autofocusSelector = null;
+  function applyAutofocus(){
+    if(!autofocusSelector) return;
+    var el = document.querySelector(autofocusSelector);
+    if(el){
+      el.focus();
+      if(typeof el.value === "string" && el.setSelectionRange){
+        try{ el.setSelectionRange(el.value.length, el.value.length); }catch(e){}
+      }
+    }
+    autofocusSelector = null;
   }
 
   /* ===================== RENDER: TODAY ===================== */
@@ -447,9 +541,10 @@
   function renderToday(){
     var ds = todayStr();
     var day = getDay(ds);
+    var targets = state.targets;
 
     var consumed = {kcal:0, p:0, c:0, f:0};
-    MEALS.forEach(function(m, i){
+    state.meals.forEach(function(m, i){
       if(day.meals[i]){
         consumed.p += m.p; consumed.c += m.c; consumed.f += m.f;
         consumed.kcal += mealKcal(m);
@@ -471,12 +566,12 @@
     html += '<div class="page-sub">'+ new Date().toLocaleDateString(undefined,{weekday:"long", month:"long", day:"numeric"}) +'</div>';
 
     html += '<div class="card totals-card">';
-    html += '<div class="totals-head"><div class="totals-kcal">'+Math.round(consumed.kcal)+' <span>/ '+TARGETS.kcal+' kcal</span></div></div>';
+    html += '<div class="totals-head"><div class="totals-kcal">'+Math.round(consumed.kcal)+' <span>/ '+targets.kcal+' kcal</span></div></div>';
     html += '<div class="macro-row">';
-    html += macroLine("Cal", "var(--accent)", consumed.kcal, TARGETS.kcal, "var(--accent)");
-    html += macroLine("Pro", "var(--protein)", consumed.p, TARGETS.p, "var(--protein)");
-    html += macroLine("Carb", "var(--carbs)", consumed.c, TARGETS.c, "var(--carbs)");
-    html += macroLine("Fat", "var(--fat)", consumed.f, TARGETS.f, "var(--fat)");
+    html += macroLine("Cal", "var(--accent)", consumed.kcal, targets.kcal, "var(--accent)");
+    html += macroLine("Pro", "var(--protein)", consumed.p, targets.p, "var(--protein)");
+    html += macroLine("Carb", "var(--carbs)", consumed.c, targets.c, "var(--carbs)");
+    html += macroLine("Fat", "var(--fat)", consumed.f, targets.f, "var(--fat)");
     html += '</div></div>';
 
     html += '<div class="toggle-row">';
@@ -488,11 +583,11 @@
       'Cardio</button>';
     html += '</div>';
 
-    MEALS.forEach(function(m, i){
+    state.meals.forEach(function(m, i){
       var checked = day.meals[i];
       html += '<div class="meal-item'+(checked?' checked':'')+'" data-meal="'+i+'">';
       html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
-      html += '<div class="meal-info"><div class="meal-name">'+m.name+'</div><div class="meal-name-sub">'+m.sub+' &middot; '+mealKcal(m)+' kcal</div></div>';
+      html += '<div class="meal-info"><div class="meal-name">'+esc(m.name)+'</div><div class="meal-name-sub">'+esc(m.sub)+' &middot; '+mealKcal(m)+' kcal</div></div>';
       html += '<div class="meal-macros">'+
         '<span class="macro-chip p">P'+m.p+'</span>'+
         '<span class="macro-chip c">C'+m.c+'</span>'+
@@ -506,7 +601,7 @@
     html += '<div class="card-title">Bodyweight</div>';
     html += '<div class="card-sub" style="margin-bottom:.7rem;">Log today\'s weigh-in</div>';
     html += '<div class="weight-row">';
-    html += '<input class="weight-input" id="weightInput" type="number" inputmode="decimal" step="0.1" placeholder="Weight (lb)" value="'+savedWeight+'">';
+    html += '<input class="weight-input" id="weightInput" type="number" inputmode="decimal" step="0.1" placeholder="Weight (lb)" value="'+escAttr(savedWeight)+'">';
     html += '<button class="save-btn" id="saveWeightBtn">Save</button>';
     html += '</div>';
     html += '<div class="save-flash" id="saveFlash"></div>';
@@ -543,65 +638,278 @@
 
   /* ===================== RENDER: DIET ===================== */
 
+  var dietEditMode = false;
+
   function renderDiet(){
+    var targets = state.targets;
     var html = '';
-    html += '<div class="page-title">Diet</div>';
+    html += '<div class="page-head-row"><div class="page-title">Diet</div>'+
+      '<button class="edit-toggle-btn'+(dietEditMode?' active':'')+'" id="dietEditToggle">'+
+      (dietEditMode
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Done'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit')+
+      '</button></div>';
     html += '<div class="page-sub">Daily targets &amp; meal plan</div>';
 
-    html += '<div class="target-strip">';
-    html += '<div class="target-pill"><div class="n">'+TARGETS.kcal+'</div><div class="l">kcal</div></div>';
-    html += '<div class="target-pill"><div class="n" style="color:var(--protein)">'+TARGETS.p+'g</div><div class="l">Protein</div></div>';
-    html += '<div class="target-pill"><div class="n" style="color:var(--carbs)">'+TARGETS.c+'g</div><div class="l">Carbs</div></div>';
-    html += '<div class="target-pill"><div class="n" style="color:var(--fat)">'+TARGETS.f+'g</div><div class="l">Fat</div></div>';
-    html += '</div>';
+    if(dietEditMode){
+      html += '<div class="card"><div class="macro-edit-row">'+
+        '<div class="macro-edit"><label>Kcal</label><input class="target-input" type="number" data-target="kcal" value="'+escAttr(targets.kcal)+'"></div>'+
+        '<div class="macro-edit"><label>Protein</label><input class="target-input" type="number" data-target="p" value="'+escAttr(targets.p)+'"></div>'+
+        '<div class="macro-edit"><label>Carbs</label><input class="target-input" type="number" data-target="c" value="'+escAttr(targets.c)+'"></div>'+
+        '<div class="macro-edit"><label>Fat</label><input class="target-input" type="number" data-target="f" value="'+escAttr(targets.f)+'"></div>'+
+        '</div></div>';
+    } else {
+      html += '<div class="target-strip">';
+      html += '<div class="target-pill"><div class="n">'+targets.kcal+'</div><div class="l">kcal</div></div>';
+      html += '<div class="target-pill"><div class="n" style="color:var(--protein)">'+targets.p+'g</div><div class="l">Protein</div></div>';
+      html += '<div class="target-pill"><div class="n" style="color:var(--carbs)">'+targets.c+'g</div><div class="l">Carbs</div></div>';
+      html += '<div class="target-pill"><div class="n" style="color:var(--fat)">'+targets.f+'g</div><div class="l">Fat</div></div>';
+      html += '</div>';
+    }
 
-    MEALS.forEach(function(m){
-      html += '<div class="card diet-meal">';
-      html += '<div class="card-title"><span>'+m.name+' &middot; '+m.sub+'</span><span class="kcal-tag">'+mealKcal(m)+' kcal</span></div>';
-      html += '<ul class="ingredient-list">';
-      m.items.forEach(function(it){ html += '<li>'+esc(it)+'</li>'; });
-      html += '</ul>';
-      html += '<div class="diet-macros">'+
-        '<span class="macro-chip p">P '+m.p+'g</span>'+
-        '<span class="macro-chip c">C '+m.c+'g</span>'+
-        '<span class="macro-chip f">F '+m.f+'g</span>'+
-        '</div>';
+    state.meals.forEach(function(m, mi){
+      html += '<div class="card diet-meal" data-meal-idx="'+mi+'">';
+      if(dietEditMode){
+        html += '<div class="field-row">'+
+          '<input class="field-input" data-meal-idx="'+mi+'" data-field="name" value="'+escAttr(m.name)+'">'+
+          '<input class="field-input" data-meal-idx="'+mi+'" data-field="sub" value="'+escAttr(m.sub)+'">'+
+          '</div>';
+        m.items.forEach(function(it, ii){
+          html += '<div class="edit-line">'+
+            '<input class="field-input" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" value="'+escAttr(it)+'">'+
+            '<button class="remove-line-btn" data-act="remove-item" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">&times;</button>'+
+            '</div>';
+        });
+        html += '<button class="add-line-btn" data-act="add-item" data-meal-idx="'+mi+'">+ Add ingredient</button>';
+        html += '<div class="macro-edit-row">'+
+          '<div class="macro-edit"><label>Protein</label><input class="macro-input" type="number" data-meal-idx="'+mi+'" data-field="p" value="'+escAttr(m.p)+'"></div>'+
+          '<div class="macro-edit"><label>Carbs</label><input class="macro-input" type="number" data-meal-idx="'+mi+'" data-field="c" value="'+escAttr(m.c)+'"></div>'+
+          '<div class="macro-edit"><label>Fat</label><input class="macro-input" type="number" data-meal-idx="'+mi+'" data-field="f" value="'+escAttr(m.f)+'"></div>'+
+          '</div>';
+        html += '<div class="card-sub" style="margin-top:.6rem;" data-kcal-display>'+mealKcal(m)+' kcal</div>';
+      } else {
+        html += '<div class="card-title"><span>'+esc(m.name)+' &middot; '+esc(m.sub)+'</span><span class="kcal-tag">'+mealKcal(m)+' kcal</span></div>';
+        html += '<ul class="ingredient-list">';
+        m.items.forEach(function(it){ html += '<li>'+esc(it)+'</li>'; });
+        html += '</ul>';
+        html += '<div class="diet-macros">'+
+          '<span class="macro-chip p">P '+m.p+'g</span>'+
+          '<span class="macro-chip c">C '+m.c+'g</span>'+
+          '<span class="macro-chip f">F '+m.f+'g</span>'+
+          '</div>';
+      }
       html += '</div>';
     });
 
     document.getElementById("content").innerHTML = html;
+    applyAutofocus();
+
+    document.getElementById("dietEditToggle").addEventListener("click", function(){
+      dietEditMode = !dietEditMode;
+      renderDiet();
+    });
+
+    if(dietEditMode){
+      document.querySelectorAll('.target-input').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var field = inp.getAttribute("data-target");
+          state.targets[field] = parseFloat(inp.value) || 0;
+          saveState();
+        });
+      });
+
+      document.querySelectorAll('.field-input[data-field]').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
+          var field = inp.getAttribute("data-field");
+          state.meals[mi][field] = inp.value;
+          saveState();
+        });
+      });
+
+      document.querySelectorAll('.field-input[data-item-idx]').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(inp.getAttribute("data-item-idx"),10);
+          state.meals[mi].items[ii] = inp.value;
+          saveState();
+        });
+      });
+
+      document.querySelectorAll('.macro-input').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
+          var field = inp.getAttribute("data-field");
+          state.meals[mi][field] = parseFloat(inp.value) || 0;
+          saveState();
+          var card = inp.closest(".diet-meal");
+          var kcalEl = card ? card.querySelector("[data-kcal-display]") : null;
+          if(kcalEl) kcalEl.textContent = mealKcal(state.meals[mi]) + " kcal";
+        });
+      });
+
+      document.querySelectorAll('[data-act="remove-item"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var mi = parseInt(btn.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(btn.getAttribute("data-item-idx"),10);
+          state.meals[mi].items.splice(ii,1);
+          saveState();
+          renderDiet();
+        });
+      });
+
+      document.querySelectorAll('[data-act="add-item"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var mi = parseInt(btn.getAttribute("data-meal-idx"),10);
+          state.meals[mi].items.push("");
+          saveState();
+          autofocusSelector = '.field-input[data-meal-idx="'+mi+'"][data-item-idx="'+(state.meals[mi].items.length-1)+'"]';
+          renderDiet();
+        });
+      });
+    }
   }
 
   /* ===================== RENDER: TRAINING ===================== */
 
   var openDays = {};
+  var trainingEditMode = false;
+
+  function parseSetCount(scheme){
+    var m = /^(\d+)/.exec(scheme||"");
+    var n = m ? parseInt(m[1],10) : 3;
+    return clampInt(n,1,8);
+  }
+
+  function blankSets(n){
+    var a = [];
+    for(var i=0;i<n;i++) a.push({w:"", r:""});
+    return a;
+  }
+
+  function getExerciseEntries(name){
+    if(!state.exerciseLog[name]) state.exerciseLog[name] = [];
+    return state.exerciseLog[name];
+  }
+
+  function materializeTodayEntry(dayIdx, exIdx){
+    var name = state.training[dayIdx].ex[exIdx][0];
+    var scheme = state.training[dayIdx].ex[exIdx][1];
+    var entries = getExerciseEntries(name);
+    var ds = todayStr();
+    var entry = entries.find(function(e){ return e.date===ds; });
+    if(!entry){
+      entry = { date: ds, sets: blankSets(parseSetCount(scheme)) };
+      entries.push(entry);
+      entries.sort(function(a,b){ return a.date<b.date?-1:(a.date>b.date?1:0); });
+    }
+    return entry;
+  }
+
+  function formatSetsSummary(sets){
+    var parts = sets.filter(function(s){ return s.w!==""&&s.w!=null; })
+      .map(function(s){ return s.w+"×"+(s.r!==""&&s.r!=null ? s.r : "-"); });
+    return parts.join(", ");
+  }
 
   function renderTraining(){
     var html = '';
-    html += '<div class="page-title">Training</div>';
+    html += '<div class="page-head-row"><div class="page-title">Training</div>'+
+      '<button class="edit-toggle-btn'+(trainingEditMode?' active':'')+'" id="trainingEditToggle">'+
+      (trainingEditMode
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Done'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit')+
+      '</button></div>';
     html += '<div class="page-sub">6-day split</div>';
 
-    TRAINING.forEach(function(d){
+    state.training.forEach(function(d, di){
       var isOpen = !!openDays[d.day];
       html += '<div class="day-card'+(d.rest?' rest':'')+(isOpen?' open':'')+'" data-day="'+d.day+'">';
       html += '<div class="day-head">';
       html += '<div class="day-head-l"><div class="day-num">'+d.day+'</div>';
-      html += '<div><div class="day-title">'+d.title+'</div><div class="day-focus">'+d.focus+'</div></div></div>';
+      html += '<div><div class="day-title">'+esc(d.title)+'</div><div class="day-focus">'+esc(d.focus)+'</div></div></div>';
       html += '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
       html += '</div>';
-      html += '<div class="day-body"><div class="day-body-inner"><ul class="ex-list">';
-      d.ex.forEach(function(e){
-        html += '<li><span class="ex-name">'+e[0]+'</span><span class="ex-scheme">'+e[1]+'</span></li>';
-      });
-      html += '</ul></div></div>';
+      html += '<div class="day-body"><div class="day-body-inner">';
+
+      if(trainingEditMode){
+        html += '<div class="field-row">'+
+          '<input class="field-input" data-day-idx="'+di+'" data-day-field="title" value="'+escAttr(d.title)+'">'+
+          '<input class="field-input" data-day-idx="'+di+'" data-day-field="focus" value="'+escAttr(d.focus)+'">'+
+          '</div>';
+        d.ex.forEach(function(e, ei){
+          html += '<div class="ex-edit-row">'+
+            '<input class="field-input" data-day-idx="'+di+'" data-ex-idx="'+ei+'" data-ex-field="0" value="'+escAttr(e[0])+'">'+
+            '<input class="field-input scheme-input" data-day-idx="'+di+'" data-ex-idx="'+ei+'" data-ex-field="1" value="'+escAttr(e[1])+'">'+
+            '<button class="remove-line-btn" data-act="remove-ex" data-day-idx="'+di+'" data-ex-idx="'+ei+'">&times;</button>'+
+            '</div>';
+        });
+        html += '<button class="add-line-btn" data-act="add-ex" data-day-idx="'+di+'">+ Add exercise</button>';
+      } else if(d.rest){
+        html += '<ul class="ex-list">';
+        d.ex.forEach(function(e){
+          html += '<li><span class="ex-name">'+esc(e[0])+'</span><span class="ex-scheme">'+esc(e[1])+'</span></li>';
+        });
+        html += '</ul>';
+      } else {
+        d.ex.forEach(function(e, ei){
+          var name = e[0], scheme = e[1];
+          var entries = state.exerciseLog[name] || [];
+          var ds = todayStr();
+          var todayEntry = entries.find(function(en){ return en.date===ds; });
+          var lastEntry = entries.slice().reverse().find(function(en){ return en.date!==ds; });
+          var rows = todayEntry ? todayEntry.sets : blankSets(parseSetCount(scheme));
+          html += '<div class="ex-block">';
+          html += '<div class="ex-row-head"><span class="ex-name">'+esc(name)+'</span><span class="ex-scheme">'+esc(scheme)+'</span></div>';
+          if(lastEntry){
+            var summary = formatSetsSummary(lastEntry.sets);
+            if(summary) html += '<div class="ex-last">Last ('+fmtDate(lastEntry.date)+'): '+esc(summary)+'</div>';
+          }
+          html += '<div class="set-rows" data-day-idx="'+di+'" data-ex-idx="'+ei+'">';
+          rows.forEach(function(row, si){
+            html += '<div class="set-row">'+
+              '<span class="set-idx">'+(si+1)+'</span>'+
+              '<input class="set-input" type="number" inputmode="decimal" placeholder="lb" data-set-idx="'+si+'" data-field="w" value="'+escAttr(row.w)+'">'+
+              '<span class="set-x">&times;</span>'+
+              '<input class="set-input" type="number" inputmode="numeric" placeholder="reps" data-set-idx="'+si+'" data-field="r" value="'+escAttr(row.r)+'">'+
+              '<button class="set-remove-btn" data-act="remove-set" data-set-idx="'+si+'">&times;</button>'+
+              '</div>';
+          });
+          html += '<button class="add-set-btn" data-act="add-set" data-day-idx="'+di+'" data-ex-idx="'+ei+'">+ Set</button>';
+          html += '</div>';
+          html += '</div>';
+        });
+      }
+
+      html += '</div></div>';
       html += '</div>';
     });
 
-    html += '<div class="card notes-card"><div class="card-title">Notes</div><ul>';
-    TRAINING_NOTES.forEach(function(n){ html += '<li>'+n+'</li>'; });
-    html += '</ul></div>';
+    html += '<div class="card notes-card"><div class="card-title">Notes</div>';
+    if(trainingEditMode){
+      html += '<div style="margin-top:.6rem;">';
+      state.notes.forEach(function(n, ni){
+        html += '<div class="edit-line">'+
+          '<input class="field-input" data-note-idx="'+ni+'" value="'+escAttr(n)+'">'+
+          '<button class="remove-line-btn" data-act="remove-note" data-note-idx="'+ni+'">&times;</button>'+
+          '</div>';
+      });
+      html += '<button class="add-line-btn" data-act="add-note">+ Add note</button>';
+      html += '</div>';
+    } else {
+      html += '<ul>';
+      state.notes.forEach(function(n){ html += '<li>'+esc(n)+'</li>'; });
+      html += '</ul>';
+    }
+    html += '</div>';
 
     document.getElementById("content").innerHTML = html;
+    applyAutofocus();
+
+    document.getElementById("trainingEditToggle").addEventListener("click", function(){
+      trainingEditMode = !trainingEditMode;
+      renderTraining();
+    });
 
     document.querySelectorAll(".day-card").forEach(function(el){
       el.querySelector(".day-head").addEventListener("click", function(){
@@ -610,6 +918,112 @@
         renderTraining();
       });
     });
+
+    if(trainingEditMode){
+      document.querySelectorAll('[data-day-field]').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var di = parseInt(inp.getAttribute("data-day-idx"),10);
+          var field = inp.getAttribute("data-day-field");
+          state.training[di][field] = inp.value;
+          saveState();
+        });
+      });
+
+      document.querySelectorAll('[data-ex-field]').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var di = parseInt(inp.getAttribute("data-day-idx"),10);
+          var ei = parseInt(inp.getAttribute("data-ex-idx"),10);
+          var fi = parseInt(inp.getAttribute("data-ex-field"),10);
+          state.training[di].ex[ei][fi] = inp.value;
+          saveState();
+        });
+      });
+
+      document.querySelectorAll('[data-act="remove-ex"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var di = parseInt(btn.getAttribute("data-day-idx"),10);
+          var ei = parseInt(btn.getAttribute("data-ex-idx"),10);
+          state.training[di].ex.splice(ei,1);
+          saveState();
+          renderTraining();
+        });
+      });
+
+      document.querySelectorAll('[data-act="add-ex"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var di = parseInt(btn.getAttribute("data-day-idx"),10);
+          state.training[di].ex.push(["New Exercise","3 x 10"]);
+          saveState();
+          autofocusSelector = '.field-input[data-day-idx="'+di+'"][data-ex-idx="'+(state.training[di].ex.length-1)+'"][data-ex-field="0"]';
+          renderTraining();
+        });
+      });
+
+      document.querySelectorAll('[data-note-idx]').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var ni = parseInt(inp.getAttribute("data-note-idx"),10);
+          state.notes[ni] = inp.value;
+          saveState();
+        });
+      });
+
+      document.querySelectorAll('[data-act="remove-note"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var ni = parseInt(btn.getAttribute("data-note-idx"),10);
+          state.notes.splice(ni,1);
+          saveState();
+          renderTraining();
+        });
+      });
+
+      var addNoteBtn = document.querySelector('[data-act="add-note"]');
+      if(addNoteBtn){
+        addNoteBtn.addEventListener("click", function(){
+          state.notes.push("");
+          saveState();
+          autofocusSelector = '[data-note-idx="'+(state.notes.length-1)+'"]';
+          renderTraining();
+        });
+      }
+    } else {
+      document.querySelectorAll('.set-input').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var wrap = inp.closest(".set-rows");
+          var di = parseInt(wrap.getAttribute("data-day-idx"),10);
+          var ei = parseInt(wrap.getAttribute("data-ex-idx"),10);
+          var si = parseInt(inp.getAttribute("data-set-idx"),10);
+          var field = inp.getAttribute("data-field");
+          var entry = materializeTodayEntry(di, ei);
+          if(!entry.sets[si]) entry.sets[si] = {w:"", r:""};
+          entry.sets[si][field] = inp.value;
+          saveState();
+        });
+      });
+
+      document.querySelectorAll('[data-act="add-set"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var di = parseInt(btn.getAttribute("data-day-idx"),10);
+          var ei = parseInt(btn.getAttribute("data-ex-idx"),10);
+          var entry = materializeTodayEntry(di, ei);
+          entry.sets.push({w:"", r:""});
+          saveState();
+          renderTraining();
+        });
+      });
+
+      document.querySelectorAll('[data-act="remove-set"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var wrap = btn.closest(".set-rows");
+          var di = parseInt(wrap.getAttribute("data-day-idx"),10);
+          var ei = parseInt(wrap.getAttribute("data-ex-idx"),10);
+          var si = parseInt(btn.getAttribute("data-set-idx"),10);
+          var entry = materializeTodayEntry(di, ei);
+          if(entry.sets.length > 1) entry.sets.splice(si,1);
+          saveState();
+          renderTraining();
+        });
+      });
+    }
   }
 
   /* ===================== RENDER: LOG ===================== */
