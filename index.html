@@ -322,7 +322,7 @@
   .ing-row-top .remove-line-btn{flex-shrink:0;}
   .ing-status{font-size:.72rem;color:var(--text-faint);margin-top:.35rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;}
   .ing-status.ok{color:var(--text-dim);}
-  .ing-status.unmatched, .ing-status.error{color:var(--fat);}
+  .ing-status.unmatched, .ing-status.error, .ing-status.ratelimited{color:var(--fat);}
   .ing-refresh-btn{
     background:none;border:1px solid var(--border);color:var(--text-dim);
     font-family:inherit;font-size:.68rem;font-weight:700;padding:.15rem .5rem;border-radius:6px;flex-shrink:0;
@@ -467,34 +467,110 @@
     else localStorage.removeItem(USDA_KEY_STORE);
   }
 
-  function lookupFood(query){
+  function tokenize(s){
+    return String(s).toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(function(w){
+      return w && ["the","a","of","and","with","in"].indexOf(w) < 0;
+    });
+  }
+
+  var PROCESSED_WORDS = ["breaded","battered","fried","tenders","nuggets","patty","patties","canned","dried","powder","powdered","microwaved","sausage","frankfurter","luncheon","smoked","cured","pickled","candied","sweetened","concentrate","juice","chips","bar","cereal","frozen"];
+
+  function scoreCandidate(queryTokens, food){
+    var desc = String(food.description||"");
+    var descTokens = tokenize(desc);
+    if(!descTokens.length) return -1;
+    var hits = 0;
+    queryTokens.forEach(function(qt){
+      var found = descTokens.some(function(dt){
+        return dt === qt || dt.indexOf(qt) === 0 || qt.indexOf(dt) === 0;
+      });
+      if(found) hits++;
+    });
+    var coverage = queryTokens.length ? hits/queryTokens.length : 0;
+    // prefer concise generic entries over long specialty descriptions
+    var brevity = 1/(1 + Math.max(0, descTokens.length - queryTokens.length));
+    var score = coverage*10 + brevity;
+    // penalize processed variants the query didn't ask for
+    descTokens.forEach(function(dt){
+      if(PROCESSED_WORDS.indexOf(dt) >= 0 && queryTokens.indexOf(dt) < 0) score -= 2;
+    });
+    // raw/cooked mismatch is a common wrong-pick
+    var qHasCooked = queryTokens.indexOf("cooked") >= 0 || queryTokens.indexOf("baked") >= 0;
+    var dHasRaw = descTokens.indexOf("raw") >= 0;
+    var dHasCooked = descTokens.indexOf("cooked") >= 0 || descTokens.indexOf("baked") >= 0 || descTokens.indexOf("roasted") >= 0;
+    if(qHasCooked && dHasCooked) score += 1.5;
+    if(qHasCooked && dHasRaw) score -= 1.5;
+    if(!qHasCooked && dHasRaw) score += 0.5;
+    return score;
+  }
+
+  function extractMacros(food){
+    var nutrients = food.foodNutrients || [];
+    function findNutrient(names){
+      var n = nutrients.find(function(x){ return names.indexOf(x.nutrientName) >= 0; });
+      return n ? n.value : 0;
+    }
+    return {
+      description: food.description,
+      per100: {
+        p: findNutrient(["Protein"]),
+        c: findNutrient(["Carbohydrate, by difference"]),
+        f: findNutrient(["Total lipid (fat)"])
+      }
+    };
+  }
+
+  function searchUsda(query){
     var params = new URLSearchParams({
       query: query,
       api_key: getUsdaKey(),
-      pageSize: "1",
+      pageSize: "10",
       dataType: "Foundation,SR Legacy"
     });
     var url = "https://api.nal.usda.gov/fdc/v1/foods/search?" + params.toString();
     return fetch(url).then(function(res){
+      if(res.status === 429){
+        var err = new Error("rate-limited");
+        err.rateLimited = true;
+        throw err;
+      }
       if(!res.ok) throw new Error("HTTP " + res.status);
       return res.json();
-    }).then(function(data){
-      if(!data.foods || !data.foods.length) return null;
-      var food = data.foods[0];
-      var nutrients = food.foodNutrients || [];
-      function findNutrient(names){
-        var n = nutrients.find(function(x){ return names.indexOf(x.nutrientName) >= 0; });
-        return n ? n.value : 0;
-      }
-      return {
-        description: food.description,
-        per100: {
-          p: findNutrient(["Protein"]),
-          c: findNutrient(["Carbohydrate, by difference"]),
-          f: findNutrient(["Total lipid (fat)"])
-        }
-      };
     });
+  }
+
+  function simplifyQuery(query){
+    // drop qualifiers after a comma ("Chicken breast, cooked" -> "Chicken breast"),
+    // then drop trailing words one at a time
+    var q = String(query).trim();
+    if(q.indexOf(",") >= 0) return q.split(",")[0].trim();
+    var words = q.split(/\s+/);
+    if(words.length > 1){ words.pop(); return words.join(" "); }
+    return null;
+  }
+
+  function lookupFood(query){
+    var queryTokens = tokenize(query);
+    function attempt(q, triesLeft){
+      return searchUsda(q).then(function(data){
+        var foods = (data && data.foods) || [];
+        if(foods.length){
+          var best = null, bestScore = -Infinity;
+          foods.forEach(function(f){
+            var s = scoreCandidate(queryTokens, f);
+            if(s > bestScore){ bestScore = s; best = f; }
+          });
+          // require at least half the query words to appear in the match
+          if(best && bestScore >= 5) return extractMacros(best);
+        }
+        var simpler = simplifyQuery(q);
+        if(simpler && triesLeft > 0) return attempt(simpler, triesLeft-1);
+        // fall back to best available candidate even if weak, rather than nothing
+        if(foods.length) return extractMacros(foods[0]);
+        return null;
+      });
+    }
+    return attempt(String(query).trim(), 2);
   }
 
   var DEFAULT_TRAINING = [
@@ -775,6 +851,7 @@
       return (item.matchDesc || "Matched") + " · " + Math.round(c.p)+"P "+Math.round(c.c)+"C "+Math.round(c.f)+"F · "+Math.round(c.p*4+c.c*4+c.f*9)+" kcal";
     }
     if(item.status === "unmatched") return "No USDA match — try a simpler name, or switch to Manual";
+    if(item.status === "ratelimited") return "USDA rate limit hit — paste a free API key above, then Refresh";
     if(item.status === "error") return "Lookup failed — check connection and retry";
     return "";
   }
@@ -828,8 +905,8 @@
       } else {
         item.status = "unmatched";
       }
-    }).catch(function(){
-      item.status = "error";
+    }).catch(function(err){
+      item.status = err && err.rateLimited ? "ratelimited" : "error";
     }).then(function(){
       saveState();
       recalcAndPaint(mi, ii);
@@ -862,8 +939,8 @@
         } else {
           item.status = "unmatched";
         }
-      }).catch(function(){
-        item.status = "error";
+      }).catch(function(err){
+        item.status = err && err.rateLimited ? "ratelimited" : "error";
       }).then(function(){
         saveState();
         recalcAndPaint(ref.mi, ref.ii);
