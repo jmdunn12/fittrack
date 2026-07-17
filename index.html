@@ -315,15 +315,11 @@
   .usda-key-row input{flex:1;min-width:0;}
   .usda-key-hint{color:var(--text-faint);font-size:.68rem;margin-bottom:1rem;line-height:1.4;}
   .ing-row{margin-bottom:.6rem;}
-  .ing-row-top{display:flex;gap:.5rem;align-items:center;}
-  .ing-row-top .ing-food{flex:1;min-width:0;}
-  .ing-row-top .ing-qty{flex:0 0 4.2rem;}
-  .ing-row-top .ing-unit{flex:0 0 4rem;}
-  select.field-input{
-    appearance:none;-webkit-appearance:none;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238A8F9E' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat:no-repeat;background-position:right .4rem center;background-size:14px;padding-right:1.5rem;
-  }
+  .ing-row-top{display:flex;gap:.5rem;align-items:flex-end;}
+  .ing-field{flex:1;min-width:0;}
+  .ing-field.ing-field-grams{flex:0 0 5.5rem;}
+  .ing-field label{display:block;font-size:.62rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-bottom:.25rem;}
+  .ing-row-top .remove-line-btn{flex-shrink:0;}
   .ing-status{font-size:.72rem;color:var(--text-faint);margin-top:.35rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;}
   .ing-status.ok{color:var(--text-dim);}
   .ing-status.unmatched, .ing-status.error{color:var(--fat);}
@@ -438,8 +434,7 @@
       return item.manual ? {p:item.manual.p, c:item.manual.c, f:item.manual.f} : {p:0,c:0,f:0};
     }
     if(!item.per100) return {p:0, c:0, f:0};
-    var grams = item.unit === "oz" ? item.qty*28.3495 : item.qty;
-    var ratio = grams/100;
+    var ratio = item.qty/100;
     return {p:item.per100.p*ratio, c:item.per100.c*ratio, f:item.per100.f*ratio};
   }
 
@@ -893,14 +888,13 @@
     var html = '<div class="ing-row">';
     html += '<div class="ing-row-top">';
     if(item.mode === "manual"){
-      html += '<input class="field-input ing-food" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="text" value="'+escAttr(item.text)+'" placeholder="e.g. 1 scoop whey protein">';
+      html += '<div class="ing-field"><label>Food type</label>'+
+        '<input class="field-input ing-food" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="text" value="'+escAttr(item.text)+'" placeholder="e.g. 1 scoop whey protein"></div>';
     } else {
-      html += '<input class="field-input ing-food" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="food" value="'+escAttr(item.food)+'" placeholder="Food name">';
-      html += '<input class="field-input ing-qty" type="number" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="qty" value="'+escAttr(item.qty)+'">';
-      html += '<select class="field-input ing-unit" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="unit">'+
-        '<option value="g"'+(item.unit==="g"?" selected":"")+'>g</option>'+
-        '<option value="oz"'+(item.unit==="oz"?" selected":"")+'>oz</option>'+
-        '</select>';
+      html += '<div class="ing-field"><label>Food type</label>'+
+        '<input class="field-input ing-food" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="food" value="'+escAttr(item.food)+'" placeholder="e.g. Chicken breast, cooked"></div>';
+      html += '<div class="ing-field ing-field-grams"><label>Grams</label>'+
+        '<input class="field-input ing-qty" type="number" inputmode="decimal" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="qty" value="'+escAttr(item.qty)+'"></div>';
     }
     html += '<button class="remove-line-btn" data-act="remove-item" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">&times;</button>';
     html += '</div>';
@@ -1033,16 +1027,6 @@
           var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
           var ii = parseInt(inp.getAttribute("data-item-idx"),10);
           state.meals[mi].items[ii].qty = parseFloat(inp.value) || 0;
-          saveState();
-          recalcAndPaint(mi, ii);
-        });
-      });
-
-      document.querySelectorAll('.ing-unit').forEach(function(sel){
-        sel.addEventListener("change", function(){
-          var mi = parseInt(sel.getAttribute("data-meal-idx"),10);
-          var ii = parseInt(sel.getAttribute("data-item-idx"),10);
-          state.meals[mi].items[ii].unit = sel.value;
           saveState();
           recalcAndPaint(mi, ii);
         });
