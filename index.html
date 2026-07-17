@@ -365,8 +365,6 @@
 
   /* ===================== DATA ===================== */
 
-  var DEFAULT_TARGETS = { kcal: 2100, p: 222, c: 150, f: 70 };
-
   var DEFAULT_MEALS = [
     { id:1, name:"Meal 1", sub:"Breakfast",
       items:["180g egg whites","90g whole eggs (~2 eggs)","40g dry oats","100g blueberries","16g peanut butter"],
@@ -389,6 +387,15 @@
   ];
 
   function mealKcal(m){ return m.p*4 + m.c*4 + m.f*9; }
+
+  function getDailyTotals(){
+    var t = {kcal:0, p:0, c:0, f:0};
+    state.meals.forEach(function(m){
+      t.p += m.p; t.c += m.c; t.f += m.f;
+      t.kcal += mealKcal(m);
+    });
+    return t;
+  }
 
   var DEFAULT_TRAINING = [
     { day:1, title:"Day 1 — Push", focus:"Chest / Shoulders / Triceps", rest:false, ex:[
@@ -481,7 +488,6 @@
     if(!s.weights) s.weights = SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; });
     if(!s.meals) s.meals = clone(DEFAULT_MEALS);
     if(!s.training) s.training = clone(DEFAULT_TRAINING);
-    if(!s.targets) s.targets = clone(DEFAULT_TARGETS);
     if(!s.notes) s.notes = clone(DEFAULT_NOTES);
     if(!s.exerciseLog) s.exerciseLog = {};
     return s;
@@ -541,7 +547,7 @@
   function renderToday(){
     var ds = todayStr();
     var day = getDay(ds);
-    var targets = state.targets;
+    var targets = getDailyTotals();
 
     var consumed = {kcal:0, p:0, c:0, f:0};
     state.meals.forEach(function(m, i){
@@ -552,7 +558,7 @@
     });
 
     function macroLine(label, dotColor, val, target, fillColor){
-      var pct = clamp((val/target)*100, 0, 100);
+      var pct = target>0 ? clamp((val/target)*100, 0, 100) : 0;
       return '<div class="macro-line">'+
         '<span class="dot" style="background:'+dotColor+'"></span>'+
         '<span class="macro-label">'+label+'</span>'+
@@ -641,7 +647,7 @@
   var dietEditMode = false;
 
   function renderDiet(){
-    var targets = state.targets;
+    var totals = getDailyTotals();
     var html = '';
     html += '<div class="page-head-row"><div class="page-title">Diet</div>'+
       '<button class="edit-toggle-btn'+(dietEditMode?' active':'')+'" id="dietEditToggle">'+
@@ -649,23 +655,14 @@
         ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Done'
         : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit')+
       '</button></div>';
-    html += '<div class="page-sub">Daily targets &amp; meal plan</div>';
+    html += '<div class="page-sub">Daily totals &amp; meal plan</div>';
 
-    if(dietEditMode){
-      html += '<div class="card"><div class="macro-edit-row">'+
-        '<div class="macro-edit"><label>Kcal</label><input class="target-input" type="number" data-target="kcal" value="'+escAttr(targets.kcal)+'"></div>'+
-        '<div class="macro-edit"><label>Protein</label><input class="target-input" type="number" data-target="p" value="'+escAttr(targets.p)+'"></div>'+
-        '<div class="macro-edit"><label>Carbs</label><input class="target-input" type="number" data-target="c" value="'+escAttr(targets.c)+'"></div>'+
-        '<div class="macro-edit"><label>Fat</label><input class="target-input" type="number" data-target="f" value="'+escAttr(targets.f)+'"></div>'+
-        '</div></div>';
-    } else {
-      html += '<div class="target-strip">';
-      html += '<div class="target-pill"><div class="n">'+targets.kcal+'</div><div class="l">kcal</div></div>';
-      html += '<div class="target-pill"><div class="n" style="color:var(--protein)">'+targets.p+'g</div><div class="l">Protein</div></div>';
-      html += '<div class="target-pill"><div class="n" style="color:var(--carbs)">'+targets.c+'g</div><div class="l">Carbs</div></div>';
-      html += '<div class="target-pill"><div class="n" style="color:var(--fat)">'+targets.f+'g</div><div class="l">Fat</div></div>';
-      html += '</div>';
-    }
+    html += '<div class="target-strip">';
+    html += '<div class="target-pill"><div class="n" id="dietSumKcal">'+Math.round(totals.kcal)+'</div><div class="l">kcal</div></div>';
+    html += '<div class="target-pill"><div class="n" id="dietSumP" style="color:var(--protein)">'+Math.round(totals.p)+'g</div><div class="l">Protein</div></div>';
+    html += '<div class="target-pill"><div class="n" id="dietSumC" style="color:var(--carbs)">'+Math.round(totals.c)+'g</div><div class="l">Carbs</div></div>';
+    html += '<div class="target-pill"><div class="n" id="dietSumF" style="color:var(--fat)">'+Math.round(totals.f)+'g</div><div class="l">Fat</div></div>';
+    html += '</div>';
 
     state.meals.forEach(function(m, mi){
       html += '<div class="card diet-meal" data-meal-idx="'+mi+'">';
@@ -710,14 +707,6 @@
     });
 
     if(dietEditMode){
-      document.querySelectorAll('.target-input').forEach(function(inp){
-        inp.addEventListener("input", function(){
-          var field = inp.getAttribute("data-target");
-          state.targets[field] = parseFloat(inp.value) || 0;
-          saveState();
-        });
-      });
-
       document.querySelectorAll('.field-input[data-field]').forEach(function(inp){
         inp.addEventListener("input", function(){
           var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
@@ -745,6 +734,16 @@
           var card = inp.closest(".diet-meal");
           var kcalEl = card ? card.querySelector("[data-kcal-display]") : null;
           if(kcalEl) kcalEl.textContent = mealKcal(state.meals[mi]) + " kcal";
+
+          var totals = getDailyTotals();
+          var kEl = document.getElementById("dietSumKcal");
+          var pEl = document.getElementById("dietSumP");
+          var cEl = document.getElementById("dietSumC");
+          var fEl = document.getElementById("dietSumF");
+          if(kEl) kEl.textContent = Math.round(totals.kcal);
+          if(pEl) pEl.textContent = Math.round(totals.p) + "g";
+          if(cEl) cEl.textContent = Math.round(totals.c) + "g";
+          if(fEl) fEl.textContent = Math.round(totals.f) + "g";
         });
       });
 
