@@ -310,6 +310,32 @@
   .ex-edit-row .field-input{flex:1;min-width:0;}
   .ex-edit-row .field-input.scheme-input{flex:0 0 6.5rem;}
 
+  /* ---- Ingredient rows (Diet) ---- */
+  .usda-key-row{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;}
+  .usda-key-row input{flex:1;min-width:0;}
+  .usda-key-hint{color:var(--text-faint);font-size:.68rem;margin-bottom:1rem;line-height:1.4;}
+  .ing-row{margin-bottom:.6rem;}
+  .ing-row-top{display:flex;gap:.5rem;align-items:center;}
+  .ing-row-top .ing-food{flex:1;min-width:0;}
+  .ing-row-top .ing-qty{flex:0 0 4.2rem;}
+  .ing-row-top .ing-unit{flex:0 0 4rem;}
+  select.field-input{
+    appearance:none;-webkit-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238A8F9E' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right .4rem center;background-size:14px;padding-right:1.5rem;
+  }
+  .ing-status{font-size:.72rem;color:var(--text-faint);margin-top:.35rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;}
+  .ing-status.ok{color:var(--text-dim);}
+  .ing-status.unmatched, .ing-status.error{color:var(--fat);}
+  .ing-refresh-btn{
+    background:none;border:1px solid var(--border);color:var(--text-dim);
+    font-family:inherit;font-size:.68rem;font-weight:700;padding:.15rem .5rem;border-radius:6px;flex-shrink:0;
+  }
+  .ing-manual-row{display:flex;gap:.4rem;margin-top:.4rem;}
+  .ing-manual-row .macro-edit{flex:1;}
+  .ing-manual-row .macro-edit input{font-size:.8rem;padding:.4rem;}
+  .ing-contrib{font-size:.72rem;color:var(--text-dim);}
+
   /* ---- Exercise set tracking ---- */
   .ex-block{padding:.7rem 0;border-bottom:1px solid var(--border);}
   .ex-block:last-child{border-bottom:none;}
@@ -365,36 +391,115 @@
 
   /* ===================== DATA ===================== */
 
+  function ing(food, qty, unit){
+    return { mode:"auto", food:food, qty:qty, unit:unit||"g", per100:null, matchDesc:null, status:"pending" };
+  }
+  function ingManual(text, p, c, f){
+    return { mode:"manual", text:text, manual:{p:p, c:c, f:f} };
+  }
+
   var DEFAULT_MEALS = [
-    { id:1, name:"Meal 1", sub:"Breakfast",
-      items:["180g egg whites","90g whole eggs (~2 eggs)","40g dry oats","100g blueberries","16g peanut butter"],
-      p:45, c:45, f:20 },
-    { id:2, name:"Meal 2", sub:"Lunch",
-      items:["160g chicken breast","70g cooked jasmine rice","150g cucumber","6g olive oil"],
-      p:41, c:24, f:9 },
-    { id:3, name:"Meal 3", sub:"Mid-Afternoon",
-      items:["160g chicken breast","180g baked sweet potato","150g Brussels sprouts","5g olive oil"],
-      p:45, c:50, f:8 },
-    { id:4, name:"Meal 4", sub:"Pre-Workout",
-      items:["1 scoop whey protein"],
-      p:25, c:3, f:1 },
-    { id:5, name:"Meal 5", sub:"Post-Workout / Dinner",
-      items:["160g 96/4 lean ground beef","50g cooked jasmine rice","8g olive oil"],
-      p:39, c:13, f:15 },
-    { id:6, name:"Meal 6", sub:"Before Bed",
-      items:["200g nonfat Greek yogurt","30g almonds","80g strawberries"],
-      p:27, c:15, f:17 }
+    { id:1, name:"Meal 1", sub:"Breakfast", items:[
+      ing("Egg whites", 180, "g"),
+      ing("Whole eggs", 90, "g"),
+      ing("Dry oats", 40, "g"),
+      ing("Blueberries", 100, "g"),
+      ing("Peanut butter", 16, "g")
+    ]},
+    { id:2, name:"Meal 2", sub:"Lunch", items:[
+      ing("Chicken breast, cooked", 160, "g"),
+      ing("Jasmine rice, cooked", 70, "g"),
+      ing("Cucumber", 150, "g"),
+      ing("Olive oil", 6, "g")
+    ]},
+    { id:3, name:"Meal 3", sub:"Mid-Afternoon", items:[
+      ing("Chicken breast, cooked", 160, "g"),
+      ing("Sweet potato, baked", 180, "g"),
+      ing("Brussels sprouts, cooked", 150, "g"),
+      ing("Olive oil", 5, "g")
+    ]},
+    { id:4, name:"Meal 4", sub:"Pre-Workout", items:[
+      ingManual("1 scoop whey protein", 25, 3, 1)
+    ]},
+    { id:5, name:"Meal 5", sub:"Post-Workout / Dinner", items:[
+      ing("Lean ground beef 96/4, cooked", 160, "g"),
+      ing("Jasmine rice, cooked", 50, "g"),
+      ing("Olive oil", 8, "g")
+    ]},
+    { id:6, name:"Meal 6", sub:"Before Bed", items:[
+      ing("Nonfat Greek yogurt", 200, "g"),
+      ing("Almonds", 30, "g"),
+      ing("Strawberries", 80, "g")
+    ]}
   ];
 
-  function mealKcal(m){ return m.p*4 + m.c*4 + m.f*9; }
+  function ingredientContribution(item){
+    if(item.mode === "manual"){
+      return item.manual ? {p:item.manual.p, c:item.manual.c, f:item.manual.f} : {p:0,c:0,f:0};
+    }
+    if(!item.per100) return {p:0, c:0, f:0};
+    var grams = item.unit === "oz" ? item.qty*28.3495 : item.qty;
+    var ratio = grams/100;
+    return {p:item.per100.p*ratio, c:item.per100.c*ratio, f:item.per100.f*ratio};
+  }
+
+  function mealTotals(m){
+    var t = {p:0, c:0, f:0};
+    m.items.forEach(function(item){
+      var c = ingredientContribution(item);
+      t.p += c.p; t.c += c.c; t.f += c.f;
+    });
+    t.kcal = t.p*4 + t.c*4 + t.f*9;
+    return t;
+  }
 
   function getDailyTotals(){
     var t = {kcal:0, p:0, c:0, f:0};
     state.meals.forEach(function(m){
-      t.p += m.p; t.c += m.c; t.f += m.f;
-      t.kcal += mealKcal(m);
+      var mt = mealTotals(m);
+      t.p += mt.p; t.c += mt.c; t.f += mt.f; t.kcal += mt.kcal;
     });
     return t;
+  }
+
+  /* ===================== USDA FOOD LOOKUP ===================== */
+
+  var USDA_KEY_STORE = "fittrack.usdaKey";
+
+  function getUsdaKey(){ return localStorage.getItem(USDA_KEY_STORE) || "DEMO_KEY"; }
+  function setUsdaKey(k){
+    if(k && k.trim()) localStorage.setItem(USDA_KEY_STORE, k.trim());
+    else localStorage.removeItem(USDA_KEY_STORE);
+  }
+
+  function lookupFood(query){
+    var params = new URLSearchParams({
+      query: query,
+      api_key: getUsdaKey(),
+      pageSize: "1",
+      dataType: "Foundation,SR Legacy"
+    });
+    var url = "https://api.nal.usda.gov/fdc/v1/foods/search?" + params.toString();
+    return fetch(url).then(function(res){
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then(function(data){
+      if(!data.foods || !data.foods.length) return null;
+      var food = data.foods[0];
+      var nutrients = food.foodNutrients || [];
+      function findNutrient(names){
+        var n = nutrients.find(function(x){ return names.indexOf(x.nutrientName) >= 0; });
+        return n ? n.value : 0;
+      }
+      return {
+        description: food.description,
+        per100: {
+          p: findNutrient(["Protein"]),
+          c: findNutrient(["Carbohydrate, by difference"]),
+          f: findNutrient(["Total lipid (fat)"])
+        }
+      };
+    });
   }
 
   var DEFAULT_TRAINING = [
@@ -471,6 +576,24 @@
 
   function clone(x){ return JSON.parse(JSON.stringify(x)); }
 
+  function migrateMeals(meals){
+    return meals.map(function(m){
+      if(m.items.length && typeof m.items[0] === "object"){
+        return m;
+      }
+      var oldP = m.p||0, oldC = m.c||0, oldF = m.f||0;
+      var items = m.items.map(function(text, idx){
+        var match = /^~?(\d+(?:\.\d+)?)\s*g\b\s*(.*)$/i.exec(String(text).trim());
+        if(match){
+          return ing(match[2] || text, parseFloat(match[1]), "g");
+        }
+        return ingManual(text, idx===0 ? oldP : 0, idx===0 ? oldC : 0, idx===0 ? oldF : 0);
+      });
+      var m2 = { id:m.id, name:m.name, sub:m.sub, items:items };
+      return m2;
+    });
+  }
+
   function todayStr(){
     var d = new Date();
     var tzOff = d.getTimezoneOffset()*60000;
@@ -487,6 +610,7 @@
     if(!s.daily) s.daily = {};
     if(!s.weights) s.weights = SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; });
     if(!s.meals) s.meals = clone(DEFAULT_MEALS);
+    s.meals = migrateMeals(s.meals);
     if(!s.training) s.training = clone(DEFAULT_TRAINING);
     if(!s.notes) s.notes = clone(DEFAULT_NOTES);
     if(!s.exerciseLog) s.exerciseLog = {};
@@ -552,8 +676,9 @@
     var consumed = {kcal:0, p:0, c:0, f:0};
     state.meals.forEach(function(m, i){
       if(day.meals[i]){
-        consumed.p += m.p; consumed.c += m.c; consumed.f += m.f;
-        consumed.kcal += mealKcal(m);
+        var mt = mealTotals(m);
+        consumed.p += mt.p; consumed.c += mt.c; consumed.f += mt.f;
+        consumed.kcal += mt.kcal;
       }
     });
 
@@ -563,7 +688,7 @@
         '<span class="dot" style="background:'+dotColor+'"></span>'+
         '<span class="macro-label">'+label+'</span>'+
         '<span class="macro-track"><span class="macro-fill" style="width:'+pct+'%;background:'+fillColor+'"></span></span>'+
-        '<span class="macro-val">'+Math.round(val)+' / '+target+'g</span>'+
+        '<span class="macro-val">'+Math.round(val)+' / '+Math.round(target)+'g</span>'+
         '</div>';
     }
 
@@ -572,7 +697,7 @@
     html += '<div class="page-sub">'+ new Date().toLocaleDateString(undefined,{weekday:"long", month:"long", day:"numeric"}) +'</div>';
 
     html += '<div class="card totals-card">';
-    html += '<div class="totals-head"><div class="totals-kcal">'+Math.round(consumed.kcal)+' <span>/ '+targets.kcal+' kcal</span></div></div>';
+    html += '<div class="totals-head"><div class="totals-kcal">'+Math.round(consumed.kcal)+' <span>/ '+Math.round(targets.kcal)+' kcal</span></div></div>';
     html += '<div class="macro-row">';
     html += macroLine("Cal", "var(--accent)", consumed.kcal, targets.kcal, "var(--accent)");
     html += macroLine("Pro", "var(--protein)", consumed.p, targets.p, "var(--protein)");
@@ -591,13 +716,14 @@
 
     state.meals.forEach(function(m, i){
       var checked = day.meals[i];
+      var mt = mealTotals(m);
       html += '<div class="meal-item'+(checked?' checked':'')+'" data-meal="'+i+'">';
       html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
-      html += '<div class="meal-info"><div class="meal-name">'+esc(m.name)+'</div><div class="meal-name-sub">'+esc(m.sub)+' &middot; '+mealKcal(m)+' kcal</div></div>';
+      html += '<div class="meal-info"><div class="meal-name">'+esc(m.name)+'</div><div class="meal-name-sub">'+esc(m.sub)+' &middot; '+Math.round(mt.kcal)+' kcal</div></div>';
       html += '<div class="meal-macros">'+
-        '<span class="macro-chip p">P'+m.p+'</span>'+
-        '<span class="macro-chip c">C'+m.c+'</span>'+
-        '<span class="macro-chip f">F'+m.f+'</span>'+
+        '<span class="macro-chip p">P'+Math.round(mt.p)+'</span>'+
+        '<span class="macro-chip c">C'+Math.round(mt.c)+'</span>'+
+        '<span class="macro-chip f">F'+Math.round(mt.f)+'</span>'+
         '</div>';
       html += '</div>';
     });
@@ -645,6 +771,157 @@
   /* ===================== RENDER: DIET ===================== */
 
   var dietEditMode = false;
+  var lookupQueueRunning = false;
+
+  function ingStatusText(item){
+    if(item.status === "pending") return "Looking up macros…";
+    if(item.status === "ok"){
+      var c = ingredientContribution(item);
+      return (item.matchDesc || "Matched") + " · " + Math.round(c.p)+"P "+Math.round(c.c)+"C "+Math.round(c.f)+"F · "+Math.round(c.p*4+c.c*4+c.f*9)+" kcal";
+    }
+    if(item.status === "unmatched") return "No USDA match — try a simpler name, or switch to Manual";
+    if(item.status === "error") return "Lookup failed — check connection and retry";
+    return "";
+  }
+
+  function formatIngredientLine(item){
+    if(item.mode === "manual") return item.text;
+    var qtyStr = (item.qty % 1 === 0) ? item.qty : round1(item.qty);
+    return qtyStr + item.unit + " " + item.food;
+  }
+
+  function recalcAndPaint(mi, ii){
+    if(ii != null){
+      var item = state.meals[mi].items[ii];
+      var statusRow = document.querySelector('.ing-status[data-meal-idx="'+mi+'"][data-item-idx="'+ii+'"]');
+      if(statusRow && item){
+        statusRow.className = "ing-status " + (item.status||"");
+        var textEl = statusRow.querySelector(".ing-status-text");
+        if(textEl) textEl.textContent = ingStatusText(item);
+      }
+    }
+    var mt = mealTotals(state.meals[mi]);
+    var card = document.querySelector('.diet-meal[data-meal-idx="'+mi+'"]');
+    if(card){
+      var k = card.querySelector('[data-meal-kcal]'); if(k) k.textContent = Math.round(mt.kcal) + ' kcal';
+      var p = card.querySelector('[data-meal-p]'); if(p) p.textContent = 'P ' + Math.round(mt.p) + 'g';
+      var c2 = card.querySelector('[data-meal-c]'); if(c2) c2.textContent = 'C ' + Math.round(mt.c) + 'g';
+      var f = card.querySelector('[data-meal-f]'); if(f) f.textContent = 'F ' + Math.round(mt.f) + 'g';
+    }
+    var totals = getDailyTotals();
+    var kEl = document.getElementById("dietSumKcal");
+    var pEl = document.getElementById("dietSumP");
+    var cEl = document.getElementById("dietSumC");
+    var fEl = document.getElementById("dietSumF");
+    if(kEl) kEl.textContent = Math.round(totals.kcal);
+    if(pEl) pEl.textContent = Math.round(totals.p) + "g";
+    if(cEl) cEl.textContent = Math.round(totals.c) + "g";
+    if(fEl) fEl.textContent = Math.round(totals.f) + "g";
+  }
+
+  function relookupIngredient(mi, ii){
+    var item = state.meals[mi].items[ii];
+    if(!item || item.mode !== "auto" || !item.food || !item.food.trim()) return;
+    item.status = "pending";
+    saveState();
+    recalcAndPaint(mi, ii);
+    lookupFood(item.food).then(function(result){
+      if(result){
+        item.per100 = result.per100;
+        item.matchDesc = result.description;
+        item.status = "ok";
+      } else {
+        item.status = "unmatched";
+      }
+    }).catch(function(){
+      item.status = "error";
+    }).then(function(){
+      saveState();
+      recalcAndPaint(mi, ii);
+    });
+  }
+
+  function processPendingLookups(){
+    if(lookupQueueRunning) return;
+    var queue = [];
+    state.meals.forEach(function(m, mi){
+      m.items.forEach(function(item, ii){
+        if(item.mode === "auto" && item.status === "pending" && item.food && item.food.trim()){
+          queue.push({mi:mi, ii:ii});
+        }
+      });
+    });
+    if(!queue.length) return;
+    lookupQueueRunning = true;
+    var idx = 0;
+    function next(){
+      if(idx >= queue.length){ lookupQueueRunning = false; return; }
+      var ref = queue[idx++];
+      var item = state.meals[ref.mi] && state.meals[ref.mi].items[ref.ii];
+      if(!item || item.mode !== "auto"){ next(); return; }
+      lookupFood(item.food).then(function(result){
+        if(result){
+          item.per100 = result.per100;
+          item.matchDesc = result.description;
+          item.status = "ok";
+        } else {
+          item.status = "unmatched";
+        }
+      }).catch(function(){
+        item.status = "error";
+      }).then(function(){
+        saveState();
+        recalcAndPaint(ref.mi, ref.ii);
+        setTimeout(next, 350);
+      });
+    }
+    next();
+  }
+
+  function switchIngredientMode(mi, ii, newMode){
+    var item = state.meals[mi].items[ii];
+    if(newMode === "manual" && item.mode !== "manual"){
+      state.meals[mi].items[ii] = ingManual(item.food || "Item", 0, 0, 0);
+    } else if(newMode === "auto" && item.mode !== "auto"){
+      state.meals[mi].items[ii] = ing(item.text || "", 100, "g");
+    }
+    saveState();
+    renderDiet();
+  }
+
+  function buildIngredientRowHtml(mi, ii, item){
+    var html = '<div class="ing-row">';
+    html += '<div class="ing-row-top">';
+    if(item.mode === "manual"){
+      html += '<input class="field-input ing-food" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="text" value="'+escAttr(item.text)+'" placeholder="e.g. 1 scoop whey protein">';
+    } else {
+      html += '<input class="field-input ing-food" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="food" value="'+escAttr(item.food)+'" placeholder="Food name">';
+      html += '<input class="field-input ing-qty" type="number" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="qty" value="'+escAttr(item.qty)+'">';
+      html += '<select class="field-input ing-unit" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-ing-field="unit">'+
+        '<option value="g"'+(item.unit==="g"?" selected":"")+'>g</option>'+
+        '<option value="oz"'+(item.unit==="oz"?" selected":"")+'>oz</option>'+
+        '</select>';
+    }
+    html += '<button class="remove-line-btn" data-act="remove-item" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">&times;</button>';
+    html += '</div>';
+
+    if(item.mode === "manual"){
+      html += '<div class="ing-manual-row">'+
+        '<div class="macro-edit"><label>P</label><input type="number" class="ing-manual-input" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-macro="p" value="'+escAttr(item.manual.p)+'"></div>'+
+        '<div class="macro-edit"><label>C</label><input type="number" class="ing-manual-input" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-macro="c" value="'+escAttr(item.manual.c)+'"></div>'+
+        '<div class="macro-edit"><label>F</label><input type="number" class="ing-manual-input" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" data-macro="f" value="'+escAttr(item.manual.f)+'"></div>'+
+        '</div>';
+      html += '<div class="ing-status"><button class="ing-refresh-btn" data-act="mode-auto" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">Switch to auto (g)</button></div>';
+    } else {
+      html += '<div class="ing-status '+esc(item.status||"")+'" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">'+
+        '<span class="ing-status-text">'+esc(ingStatusText(item))+'</span>'+
+        '<button class="ing-refresh-btn" data-act="relookup" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">&#8635; Refresh</button>'+
+        '<button class="ing-refresh-btn" data-act="mode-manual" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">Manual</button>'+
+        '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
 
   function renderDiet(){
     var totals = getDailyTotals();
@@ -657,6 +934,12 @@
       '</button></div>';
     html += '<div class="page-sub">Daily totals &amp; meal plan</div>';
 
+    if(dietEditMode){
+      var savedKey = localStorage.getItem(USDA_KEY_STORE) || "";
+      html += '<div class="usda-key-row"><input class="field-input" id="usdaKeyInput" placeholder="USDA API key (optional)" value="'+escAttr(savedKey)+'"></div>';
+      html += '<div class="usda-key-hint">Macros auto-pull from USDA FoodData Central using '+(savedKey?'your saved key':'the shared DEMO_KEY, which is rate-limited')+'. Free instant key: fdc.nal.usda.gov/api-key-signup</div>';
+    }
+
     html += '<div class="target-strip">';
     html += '<div class="target-pill"><div class="n" id="dietSumKcal">'+Math.round(totals.kcal)+'</div><div class="l">kcal</div></div>';
     html += '<div class="target-pill"><div class="n" id="dietSumP" style="color:var(--protein)">'+Math.round(totals.p)+'g</div><div class="l">Protein</div></div>';
@@ -665,34 +948,32 @@
     html += '</div>';
 
     state.meals.forEach(function(m, mi){
+      var mt = mealTotals(m);
       html += '<div class="card diet-meal" data-meal-idx="'+mi+'">';
       if(dietEditMode){
         html += '<div class="field-row">'+
           '<input class="field-input" data-meal-idx="'+mi+'" data-field="name" value="'+escAttr(m.name)+'">'+
           '<input class="field-input" data-meal-idx="'+mi+'" data-field="sub" value="'+escAttr(m.sub)+'">'+
           '</div>';
-        m.items.forEach(function(it, ii){
-          html += '<div class="edit-line">'+
-            '<input class="field-input" data-meal-idx="'+mi+'" data-item-idx="'+ii+'" value="'+escAttr(it)+'">'+
-            '<button class="remove-line-btn" data-act="remove-item" data-meal-idx="'+mi+'" data-item-idx="'+ii+'">&times;</button>'+
-            '</div>';
+        m.items.forEach(function(item, ii){
+          html += buildIngredientRowHtml(mi, ii, item);
         });
         html += '<button class="add-line-btn" data-act="add-item" data-meal-idx="'+mi+'">+ Add ingredient</button>';
-        html += '<div class="macro-edit-row">'+
-          '<div class="macro-edit"><label>Protein</label><input class="macro-input" type="number" data-meal-idx="'+mi+'" data-field="p" value="'+escAttr(m.p)+'"></div>'+
-          '<div class="macro-edit"><label>Carbs</label><input class="macro-input" type="number" data-meal-idx="'+mi+'" data-field="c" value="'+escAttr(m.c)+'"></div>'+
-          '<div class="macro-edit"><label>Fat</label><input class="macro-input" type="number" data-meal-idx="'+mi+'" data-field="f" value="'+escAttr(m.f)+'"></div>'+
+        html += '<div class="card-sub" data-meal-kcal>'+Math.round(mt.kcal)+' kcal</div>';
+        html += '<div class="diet-macros" style="margin-top:.4rem;">'+
+          '<span class="macro-chip p" data-meal-p>P '+Math.round(mt.p)+'g</span>'+
+          '<span class="macro-chip c" data-meal-c>C '+Math.round(mt.c)+'g</span>'+
+          '<span class="macro-chip f" data-meal-f>F '+Math.round(mt.f)+'g</span>'+
           '</div>';
-        html += '<div class="card-sub" style="margin-top:.6rem;" data-kcal-display>'+mealKcal(m)+' kcal</div>';
       } else {
-        html += '<div class="card-title"><span>'+esc(m.name)+' &middot; '+esc(m.sub)+'</span><span class="kcal-tag">'+mealKcal(m)+' kcal</span></div>';
+        html += '<div class="card-title"><span>'+esc(m.name)+' &middot; '+esc(m.sub)+'</span><span class="kcal-tag">'+Math.round(mt.kcal)+' kcal</span></div>';
         html += '<ul class="ingredient-list">';
-        m.items.forEach(function(it){ html += '<li>'+esc(it)+'</li>'; });
+        m.items.forEach(function(item){ html += '<li>'+esc(formatIngredientLine(item))+'</li>'; });
         html += '</ul>';
         html += '<div class="diet-macros">'+
-          '<span class="macro-chip p">P '+m.p+'g</span>'+
-          '<span class="macro-chip c">C '+m.c+'g</span>'+
-          '<span class="macro-chip f">F '+m.f+'g</span>'+
+          '<span class="macro-chip p">P '+Math.round(mt.p)+'g</span>'+
+          '<span class="macro-chip c">C '+Math.round(mt.c)+'g</span>'+
+          '<span class="macro-chip f">F '+Math.round(mt.f)+'g</span>'+
           '</div>';
       }
       html += '</div>';
@@ -707,6 +988,14 @@
     });
 
     if(dietEditMode){
+      var usdaKeyInput = document.getElementById("usdaKeyInput");
+      if(usdaKeyInput){
+        usdaKeyInput.addEventListener("change", function(){
+          setUsdaKey(usdaKeyInput.value);
+          renderDiet();
+        });
+      }
+
       document.querySelectorAll('.field-input[data-field]').forEach(function(inp){
         inp.addEventListener("input", function(){
           var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
@@ -716,34 +1005,81 @@
         });
       });
 
-      document.querySelectorAll('.field-input[data-item-idx]').forEach(function(inp){
+      document.querySelectorAll('.ing-food[data-ing-field="food"]').forEach(function(inp){
         inp.addEventListener("input", function(){
           var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
           var ii = parseInt(inp.getAttribute("data-item-idx"),10);
-          state.meals[mi].items[ii] = inp.value;
+          state.meals[mi].items[ii].food = inp.value;
+          saveState();
+        });
+        inp.addEventListener("change", function(){
+          var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(inp.getAttribute("data-item-idx"),10);
+          relookupIngredient(mi, ii);
+        });
+      });
+
+      document.querySelectorAll('.ing-food[data-ing-field="text"]').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(inp.getAttribute("data-item-idx"),10);
+          state.meals[mi].items[ii].text = inp.value;
           saveState();
         });
       });
 
-      document.querySelectorAll('.macro-input').forEach(function(inp){
+      document.querySelectorAll('.ing-qty').forEach(function(inp){
         inp.addEventListener("input", function(){
           var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
-          var field = inp.getAttribute("data-field");
-          state.meals[mi][field] = parseFloat(inp.value) || 0;
+          var ii = parseInt(inp.getAttribute("data-item-idx"),10);
+          state.meals[mi].items[ii].qty = parseFloat(inp.value) || 0;
           saveState();
-          var card = inp.closest(".diet-meal");
-          var kcalEl = card ? card.querySelector("[data-kcal-display]") : null;
-          if(kcalEl) kcalEl.textContent = mealKcal(state.meals[mi]) + " kcal";
+          recalcAndPaint(mi, ii);
+        });
+      });
 
-          var totals = getDailyTotals();
-          var kEl = document.getElementById("dietSumKcal");
-          var pEl = document.getElementById("dietSumP");
-          var cEl = document.getElementById("dietSumC");
-          var fEl = document.getElementById("dietSumF");
-          if(kEl) kEl.textContent = Math.round(totals.kcal);
-          if(pEl) pEl.textContent = Math.round(totals.p) + "g";
-          if(cEl) cEl.textContent = Math.round(totals.c) + "g";
-          if(fEl) fEl.textContent = Math.round(totals.f) + "g";
+      document.querySelectorAll('.ing-unit').forEach(function(sel){
+        sel.addEventListener("change", function(){
+          var mi = parseInt(sel.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(sel.getAttribute("data-item-idx"),10);
+          state.meals[mi].items[ii].unit = sel.value;
+          saveState();
+          recalcAndPaint(mi, ii);
+        });
+      });
+
+      document.querySelectorAll('.ing-manual-input').forEach(function(inp){
+        inp.addEventListener("input", function(){
+          var mi = parseInt(inp.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(inp.getAttribute("data-item-idx"),10);
+          var macro = inp.getAttribute("data-macro");
+          state.meals[mi].items[ii].manual[macro] = parseFloat(inp.value) || 0;
+          saveState();
+          recalcAndPaint(mi, ii);
+        });
+      });
+
+      document.querySelectorAll('[data-act="relookup"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var mi = parseInt(btn.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(btn.getAttribute("data-item-idx"),10);
+          relookupIngredient(mi, ii);
+        });
+      });
+
+      document.querySelectorAll('[data-act="mode-manual"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var mi = parseInt(btn.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(btn.getAttribute("data-item-idx"),10);
+          switchIngredientMode(mi, ii, "manual");
+        });
+      });
+
+      document.querySelectorAll('[data-act="mode-auto"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var mi = parseInt(btn.getAttribute("data-meal-idx"),10);
+          var ii = parseInt(btn.getAttribute("data-item-idx"),10);
+          switchIngredientMode(mi, ii, "auto");
         });
       });
 
@@ -760,13 +1096,15 @@
       document.querySelectorAll('[data-act="add-item"]').forEach(function(btn){
         btn.addEventListener("click", function(){
           var mi = parseInt(btn.getAttribute("data-meal-idx"),10);
-          state.meals[mi].items.push("");
+          state.meals[mi].items.push(ing("", 100, "g"));
           saveState();
-          autofocusSelector = '.field-input[data-meal-idx="'+mi+'"][data-item-idx="'+(state.meals[mi].items.length-1)+'"]';
+          autofocusSelector = '.ing-food[data-meal-idx="'+mi+'"][data-item-idx="'+(state.meals[mi].items.length-1)+'"]';
           renderDiet();
         });
       });
     }
+
+    processPendingLookups();
   }
 
   /* ===================== RENDER: TRAINING ===================== */
