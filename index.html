@@ -312,6 +312,30 @@
 
   /* ---- Ingredient rows (Diet) ---- */
   .lookup-hint{color:var(--text-faint);font-size:.68rem;margin-bottom:1rem;line-height:1.4;}
+
+  /* ---- Welcome (first run) ---- */
+  .welcome{
+    min-height:calc(100dvh - 10rem);
+    display:flex;flex-direction:column;justify-content:center;align-items:center;
+    text-align:center;padding:1rem .5rem;
+  }
+  .welcome-icon{
+    width:72px;height:72px;border-radius:20px;
+    background:var(--card);border:1px solid var(--border);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;margin-bottom:1.1rem;
+  }
+  .welcome-icon svg{width:44px;height:44px;}
+  .welcome-title{font-size:1.9rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:.5rem;}
+  .welcome-sub{color:var(--text-dim);font-size:.88rem;line-height:1.5;max-width:19rem;margin-bottom:2rem;}
+  .welcome-btn{
+    width:100%;max-width:20rem;
+    background:var(--card);border:1px solid var(--border);color:var(--text);
+    font-family:inherit;font-weight:800;font-size:.95rem;
+    padding:.95rem;border-radius:var(--radius);
+  }
+  .welcome-btn.primary{background:var(--accent);border-color:var(--accent);color:#062019;}
+  .welcome-btn:active{opacity:.8;}
+  .welcome-btn-sub{color:var(--text-faint);font-size:.72rem;margin:.45rem 0 1.1rem;max-width:19rem;}
   .quick-add-row{margin-top:.7rem;}
   .quick-add-open{margin-top:.7rem;margin-bottom:0;}
   .quick-add-confirm{
@@ -772,7 +796,35 @@
     return s;
   }
 
-  var state = loadState();
+  // First visit on a device (no saved data): show the welcome chooser
+  // instead of silently seeding the example plan.
+  var state = localStorage.getItem(STORE_KEY) ? loadState() : null;
+
+  function exampleState(){
+    return {
+      daily:{}, exerciseLog:{}, engineV:2,
+      weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
+      meals: clone(DEFAULT_MEALS),
+      training: clone(DEFAULT_TRAINING),
+      notes: clone(DEFAULT_NOTES)
+    };
+  }
+
+  function blankState(){
+    var meals = [];
+    for(var n=1;n<=6;n++) meals.push({ id:n, name:"Meal "+n, sub:"", items:[] });
+    var training = [];
+    for(var d=1;d<=7;d++){
+      training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
+    }
+    return {
+      daily:{}, exerciseLog:{}, engineV:2,
+      weights: [],
+      meals: meals,
+      training: training,
+      notes: []
+    };
+  }
 
   function saveState(){
     localStorage.setItem(STORE_KEY, JSON.stringify(state));
@@ -874,7 +926,7 @@
       var mt = mealTotals(m);
       html += '<div class="meal-item'+(checked?' checked':'')+'" data-meal="'+i+'">';
       html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
-      html += '<div class="meal-info"><div class="meal-name">'+esc(m.name)+'</div><div class="meal-name-sub">'+esc(m.sub)+' &middot; '+Math.round(mt.kcal)+' kcal</div></div>';
+      html += '<div class="meal-info"><div class="meal-name">'+esc(m.name)+'</div><div class="meal-name-sub">'+(m.sub?esc(m.sub)+' &middot; ':'')+Math.round(mt.kcal)+' kcal</div></div>';
       html += '<div class="meal-macros">'+
         '<span class="macro-chip p">P'+Math.round(mt.p)+'</span>'+
         '<span class="macro-chip c">C'+Math.round(mt.c)+'</span>'+
@@ -1123,7 +1175,7 @@
           '<span class="macro-chip f" data-meal-f>F '+Math.round(mt.f)+'g</span>'+
           '</div>';
       } else {
-        html += '<div class="card-title"><span>'+esc(m.name)+' &middot; '+esc(m.sub)+'</span><span class="kcal-tag" data-meal-kcal>'+Math.round(mt.kcal)+' kcal</span></div>';
+        html += '<div class="card-title"><span>'+esc(m.name)+(m.sub?' &middot; '+esc(m.sub):'')+'</span><span class="kcal-tag" data-meal-kcal>'+Math.round(mt.kcal)+' kcal</span></div>';
         html += '<ul class="ingredient-list">';
         m.items.forEach(function(item){ html += '<li>'+esc(formatIngredientLine(item))+'</li>'; });
         html += '</ul>';
@@ -1669,6 +1721,7 @@
   var LAST_TAB_KEY = "fittrack.lastTab";
 
   function switchTab(name){
+    if(!state) return;
     if(!TABS[name]) name = "today";
     localStorage.setItem(LAST_TAB_KEY, name);
     document.querySelectorAll(".tabbtn").forEach(function(btn){
@@ -1684,9 +1737,40 @@
     });
   });
 
-  var startTab = localStorage.getItem(LAST_TAB_KEY);
-  if(TAB_ORDER.indexOf(startTab) === -1) startTab = "today";
-  switchTab(startTab);
+  /* ===================== WELCOME (first run) ===================== */
+
+  function renderWelcome(){
+    document.getElementById("tabbar").style.display = "none";
+    var html = '';
+    html += '<div class="welcome">';
+    html += '<div class="welcome-icon"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="1" y="9.5" width="3.5" height="5" rx="1"/><rect x="19.5" y="9.5" width="3.5" height="5" rx="1"/><rect x="5.5" y="8" width="2.8" height="8" rx="1"/><rect x="15.7" y="8" width="2.8" height="8" rx="1"/><rect x="8.3" y="11" width="7.4" height="2" rx="0.5"/></svg></div>';
+    html += '<h1 class="welcome-title">FitTrack</h1>';
+    html += '<p class="welcome-sub">Track meals, training, and bodyweight. Everything is saved on this device only — nothing is uploaded anywhere.</p>';
+    html += '<button class="welcome-btn primary" id="welcomeBlank">Start fresh</button>';
+    html += '<div class="welcome-btn-sub">Blank meals, blank training days — build your own plan</div>';
+    html += '<button class="welcome-btn" id="welcomeExample">Try the example plan</button>';
+    html += '<div class="welcome-btn-sub">A filled-in 6-meal diet and 6-day training split to explore or edit</div>';
+    html += '</div>';
+    document.getElementById("content").innerHTML = html;
+
+    document.getElementById("welcomeBlank").addEventListener("click", function(){ startWith("blank"); });
+    document.getElementById("welcomeExample").addEventListener("click", function(){ startWith("example"); });
+  }
+
+  function startWith(kind){
+    state = kind === "blank" ? blankState() : exampleState();
+    saveState();
+    document.getElementById("tabbar").style.display = "";
+    switchTab("today");
+  }
+
+  if(state){
+    var startTab = localStorage.getItem(LAST_TAB_KEY);
+    if(TAB_ORDER.indexOf(startTab) === -1) startTab = "today";
+    switchTab(startTab);
+  } else {
+    renderWelcome();
+  }
 
 })();
 </script>
