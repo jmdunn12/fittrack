@@ -265,6 +265,23 @@
   .delta.up{color:var(--fat);}
   .delta.down{color:var(--accent);}
   .empty-hint{color:var(--text-dim);font-size:.85rem;text-align:center;padding:1.5rem 0;}
+  .section-title{font-size:1.05rem;font-weight:800;letter-spacing:-0.01em;margin:1.3rem 0 .7rem;}
+  .lift-card{padding:.85rem 1rem;}
+  .lift-head{display:flex;align-items:center;gap:.7rem;}
+  .lift-name-wrap{flex:1;min-width:0;}
+  .lift-name{font-weight:700;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .lift-sub{color:var(--text-dim);font-size:.7rem;margin-top:.15rem;}
+  .lift-spark{flex-shrink:0;display:flex;align-items:center;}
+  .lift-latest{flex-shrink:0;font-weight:800;font-size:1.05rem;font-variant-numeric:tabular-nums;min-width:3.2rem;text-align:right;}
+  .lift-latest small{font-size:.65rem;color:var(--text-dim);font-weight:600;}
+  .lift-change.gain{color:var(--accent);}
+  .lift-change.loss{color:var(--fat);}
+  .lift-hist{margin-top:.7rem;border-top:1px solid var(--border);padding-top:.4rem;}
+  .lift-hist-row{display:flex;gap:.6rem;font-size:.78rem;padding:.35rem 0;border-bottom:1px solid var(--border);align-items:baseline;}
+  .lift-hist-row:last-child{border-bottom:none;}
+  .lift-hist-date{color:var(--text-faint);width:3.6rem;flex-shrink:0;}
+  .lift-hist-w{flex:1;color:var(--text);font-variant-numeric:tabular-nums;}
+  .lift-hist-delta{flex-shrink:0;font-size:.72rem;font-weight:700;}
 
   /* ---- Edit mode controls ---- */
   .page-head-row{display:flex;justify-content:space-between;align-items:center;gap:.75rem;margin-bottom:.25rem;}
@@ -1689,53 +1706,146 @@
     return svg;
   }
 
+  var openLifts = {};
+
+  function topWeight(sets){
+    var m = null;
+    (sets||[]).forEach(function(s){
+      var v = parseFloat(s.w);
+      if(!isNaN(v)) m = m == null ? v : Math.max(m, v);
+    });
+    return m;
+  }
+
+  function buildSparkSVG(vals){
+    var W = 96, H = 30, pad = 4;
+    if(vals.length === 1) vals = [vals[0], vals[0]];
+    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+    if(min === max){ min -= 1; max += 1; }
+    var pts = vals.map(function(v, i){
+      var x = pad + (W - 2*pad) * i / (vals.length - 1);
+      var y = pad + (H - 2*pad) * (1 - (v - min) / (max - min));
+      return x.toFixed(1) + "," + y.toFixed(1);
+    });
+    return '<svg viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" xmlns="http://www.w3.org/2000/svg">'+
+      '<polyline points="'+pts.join(" ")+'" fill="none" stroke="#00C896" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'+
+      '<circle cx="'+pts[pts.length-1].split(",")[0]+'" cy="'+pts[pts.length-1].split(",")[1]+'" r="2.6" fill="#00C896"/>'+
+      '</svg>';
+  }
+
+  function buildLiftingHtml(){
+    // plan order first, then any logged exercises no longer in the plan
+    var names = [];
+    state.training.forEach(function(d){
+      d.ex.forEach(function(e){ if(!d.rest && names.indexOf(e[0]) < 0) names.push(e[0]); });
+    });
+    Object.keys(state.exerciseLog).forEach(function(n){ if(names.indexOf(n) < 0) names.push(n); });
+
+    var lifts = [];
+    names.forEach(function(name){
+      var entries = (state.exerciseLog[name] || []).filter(function(en){ return topWeight(en.sets) != null; });
+      if(entries.length) lifts.push({ name:name, entries:entries });
+    });
+
+    var html = '<div class="section-title">Lifting Progress</div>';
+    if(!lifts.length){
+      html += '<div class="card"><div class="empty-hint">No lifts logged yet. Enter weights on the Training tab and each exercise\'s progression will show up here.</div></div>';
+      return html;
+    }
+
+    lifts.forEach(function(l){
+      var tops = l.entries.map(function(en){ return topWeight(en.sets); });
+      var latestTop = tops[tops.length-1];
+      var firstTop = tops[0];
+      var change = latestTop - firstTop;
+      var changeHtml = "";
+      if(l.entries.length > 1 && change !== 0){
+        var cls = change > 0 ? "gain" : "loss";
+        changeHtml = '<span class="lift-change '+cls+'">'+(change>0?"+":"")+round1(change)+'</span>';
+      }
+      var isOpen = !!openLifts[l.name];
+      html += '<div class="card lift-card'+(isOpen?' open':'')+'" data-lift="'+escAttr(l.name)+'">';
+      html += '<div class="lift-head">';
+      html += '<div class="lift-name-wrap"><div class="lift-name">'+esc(l.name)+'</div>'+
+        '<div class="lift-sub">'+l.entries.length+' session'+(l.entries.length===1?'':'s')+(changeHtml?' &middot; ':'')+changeHtml+'</div></div>';
+      html += '<div class="lift-spark">'+buildSparkSVG(tops)+'</div>';
+      html += '<div class="lift-latest">'+round1(latestTop)+'<small> lb</small></div>';
+      html += '</div>';
+      if(isOpen){
+        html += '<div class="lift-hist">';
+        l.entries.slice().reverse().forEach(function(en, i, arr){
+          var prev = arr[i+1];
+          var d = prev ? topWeight(en.sets) - topWeight(prev.sets) : null;
+          var dHtml = "";
+          if(d != null && d !== 0) dHtml = '<span class="lift-change '+(d>0?"gain":"loss")+'">'+(d>0?"+":"")+round1(d)+'</span>';
+          html += '<div class="lift-hist-row">'+
+            '<span class="lift-hist-date">'+fmtDate(en.date)+'</span>'+
+            '<span class="lift-hist-w">'+esc(formatSetsSummary(en.sets))+'</span>'+
+            '<span class="lift-hist-delta">'+dHtml+'</span>'+
+            '</div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    return html;
+  }
+
   function renderLog(){
     var sorted = state.weights.slice().sort(function(a,b){ return a.date < b.date ? -1 : (a.date>b.date?1:0); });
     var ds = todayStr();
 
     var html = '';
     html += '<div class="page-title">Log</div>';
-    html += '<div class="page-sub">Bodyweight history</div>';
+    html += '<div class="page-sub">Bodyweight &amp; lifting history</div>';
 
     if(sorted.length === 0){
-      html += '<div class="card"><div class="empty-hint">No entries yet. Save a weigh-in from the Today tab.</div></div>';
-      document.getElementById("content").innerHTML = html;
-      return;
+      html += '<div class="card"><div class="empty-hint">No weigh-ins yet. Save one from the Today tab.</div></div>';
+    } else {
+      var latest = sorted[sorted.length-1];
+      var last7 = sorted.slice(Math.max(0, sorted.length-7));
+      var avg7 = last7.reduce(function(s,w){ return s+w.weight; },0) / last7.length;
+
+      html += '<div class="stat-row">';
+      html += '<div class="stat-card"><div class="v">'+round1(latest.weight)+' <small>lb</small></div><div class="l">Latest</div></div>';
+      html += '<div class="stat-card"><div class="v">'+round1(avg7)+' <small>lb</small></div><div class="l">7-Entry Avg</div></div>';
+      html += '</div>';
+
+      html += '<div class="card chart-card"><div class="chart-wrap">'+buildChartSVG(sorted)+'</div></div>';
+
+      html += '<div class="card">';
+      html += '<table class="log-table"><thead><tr><th>Date</th><th>Weight</th><th>Change</th></tr></thead><tbody>';
+      var rev = sorted.slice().reverse();
+      rev.forEach(function(w, i){
+        var idxInSorted = sorted.length-1-i;
+        var delta = idxInSorted>0 ? w.weight - sorted[idxInSorted-1].weight : null;
+        var deltaHtml = "—";
+        if(delta !== null){
+          var cls = delta>0 ? "up" : (delta<0 ? "down" : "");
+          var sign = delta>0 ? "+" : "";
+          deltaHtml = '<span class="delta '+cls+'">'+sign+round1(delta)+'</span>';
+        }
+        var isToday = w.date === ds;
+        html += '<tr class="'+(isToday?"today-row":"")+'">'+
+          '<td>'+fmtDate(w.date)+(isToday?' (Today)':'')+'</td>'+
+          '<td class="wt">'+round1(w.weight)+'</td>'+
+          '<td class="delta">'+deltaHtml+'</td>'+
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
     }
 
-    var latest = sorted[sorted.length-1];
-    var last7 = sorted.slice(Math.max(0, sorted.length-7));
-    var avg7 = last7.reduce(function(s,w){ return s+w.weight; },0) / last7.length;
-
-    html += '<div class="stat-row">';
-    html += '<div class="stat-card"><div class="v">'+round1(latest.weight)+' <small>lb</small></div><div class="l">Latest</div></div>';
-    html += '<div class="stat-card"><div class="v">'+round1(avg7)+' <small>lb</small></div><div class="l">7-Entry Avg</div></div>';
-    html += '</div>';
-
-    html += '<div class="card chart-card"><div class="chart-wrap">'+buildChartSVG(sorted)+'</div></div>';
-
-    html += '<div class="card">';
-    html += '<table class="log-table"><thead><tr><th>Date</th><th>Weight</th><th>Change</th></tr></thead><tbody>';
-    var rev = sorted.slice().reverse();
-    rev.forEach(function(w, i){
-      var idxInSorted = sorted.length-1-i;
-      var delta = idxInSorted>0 ? w.weight - sorted[idxInSorted-1].weight : null;
-      var deltaHtml = "—";
-      if(delta !== null){
-        var cls = delta>0 ? "up" : (delta<0 ? "down" : "");
-        var sign = delta>0 ? "+" : "";
-        deltaHtml = '<span class="delta '+cls+'">'+sign+round1(delta)+'</span>';
-      }
-      var isToday = w.date === ds;
-      html += '<tr class="'+(isToday?"today-row":"")+'">'+
-        '<td>'+fmtDate(w.date)+(isToday?' (Today)':'')+'</td>'+
-        '<td class="wt">'+round1(w.weight)+'</td>'+
-        '<td class="delta">'+deltaHtml+'</td>'+
-        '</tr>';
-    });
-    html += '</tbody></table></div>';
+    html += buildLiftingHtml();
 
     document.getElementById("content").innerHTML = html;
+
+    document.querySelectorAll(".lift-card").forEach(function(el){
+      el.querySelector(".lift-head").addEventListener("click", function(){
+        var name = el.getAttribute("data-lift");
+        openLifts[name] = !openLifts[name];
+        renderLog();
+      });
+    });
   }
 
   /* ===================== TAB CONTROL ===================== */
