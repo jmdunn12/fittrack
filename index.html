@@ -688,13 +688,10 @@
       ["Lying Leg Curl","3 x 12-15"],
       ["Standing Calf Raise","3 x 15 + partials"]
     ]},
-    { day:4, title:"Day 4 — Arms", focus:"Biceps / Triceps specialization", rest:false, ex:[
-      ["Close-Grip Bench Press","4 x 8-10"],
-      ["Barbell Curl","4 x 8-10"],
-      ["Skullcrusher","3 x 10-12"],
-      ["Incline DB Curl","3 x 10-12"],
-      ["Cable Triceps Pushdown","2 x 12-15 + rest-pause"],
-      ["Cable Curl","2 x 12-15 + rest-pause / partials"]
+    { day:4, title:"Day 4 — Rest", focus:"Recovery", rest:true, ex:[
+      ["Light walking / mobility work","10,000 steps"],
+      ["Optional easy cardio","20-30 min, low intensity"],
+      ["Stretching / foam rolling","10-15 min"]
     ]},
     { day:5, title:"Day 5 — Push", focus:"Chest / Shoulders / Triceps", rest:false, ex:[
       ["Incline Barbell Press","4 x 6-8"],
@@ -712,10 +709,13 @@
       ["Shrug","3 x 12-15"],
       ["Incline DB Curl","2 x 10-12 + rest-pause"]
     ]},
-    { day:7, title:"Day 7 — Rest", focus:"Recovery", rest:true, ex:[
-      ["Light walking / mobility work","10,000 steps"],
-      ["Optional easy cardio","20-30 min, low intensity"],
-      ["Stretching / foam rolling","10-15 min"]
+    { day:7, title:"Day 7 — Arms", focus:"Biceps / Triceps specialization", rest:false, ex:[
+      ["Close-Grip Bench Press","4 x 8-10"],
+      ["Barbell Curl","4 x 8-10"],
+      ["Skullcrusher","3 x 10-12"],
+      ["Incline DB Curl","3 x 10-12"],
+      ["Cable Triceps Pushdown","2 x 12-15 + rest-pause"],
+      ["Cable Curl","2 x 12-15 + rest-pause / partials"]
     ]}
   ];
 
@@ -791,6 +791,20 @@
       s.engineV = 2;
     }
     if(!s.training) s.training = clone(DEFAULT_TRAINING);
+    // split v2: rest day moves from day 7 to day 4, Arms moves to day 7.
+    // Swap the whole day objects so any edited exercises travel with them.
+    if(s.splitV !== 2){
+      var d4 = s.training[3], d7 = s.training[6];
+      if(d4 && d7 && !d4.rest && d7.rest){
+        s.training[3] = d7;
+        s.training[6] = d4;
+        s.training[3].day = 4;
+        s.training[6].day = 7;
+        s.training[3].title = String(s.training[3].title||"").replace(/^Day\s*\d+/, "Day 4");
+        s.training[6].title = String(s.training[6].title||"").replace(/^Day\s*\d+/, "Day 7");
+      }
+      s.splitV = 2;
+    }
     if(!s.notes) s.notes = clone(DEFAULT_NOTES);
     if(!s.exerciseLog) s.exerciseLog = {};
     return s;
@@ -802,7 +816,7 @@
 
   function exampleState(){
     return {
-      daily:{}, exerciseLog:{}, engineV:2,
+      daily:{}, exerciseLog:{}, engineV:2, splitV:2,
       weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
       meals: clone(DEFAULT_MEALS),
       training: clone(DEFAULT_TRAINING),
@@ -818,7 +832,7 @@
       training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
     }
     return {
-      daily:{}, exerciseLog:{}, engineV:2,
+      daily:{}, exerciseLog:{}, engineV:2, splitV:2,
       weights: [],
       meals: meals,
       training: training,
