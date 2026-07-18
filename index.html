@@ -211,6 +211,28 @@
   .adh-pct{grid-area:pct;text-align:right;font-weight:800;font-size:.85rem;font-variant-numeric:tabular-nums;}
   .adh-detail{grid-area:detail;font-size:.68rem;color:var(--text-faint);}
 
+  /* ---- Backup & Restore ---- */
+  .backup-btns{display:flex;gap:.5rem;flex-wrap:wrap;}
+  .backup-btn{
+    flex:1;min-width:8rem;background:var(--card);border:1px solid var(--border);color:var(--text);
+    font-family:inherit;font-weight:700;font-size:.82rem;padding:.7rem;border-radius:10px;
+  }
+  .backup-btn.primary{background:var(--accent);border-color:var(--accent);color:#062019;}
+  .backup-btn:active{opacity:.8;}
+  .backup-flash{color:var(--accent);font-size:.75rem;font-weight:600;line-height:1.4;margin-top:.6rem;min-height:1rem;}
+  .backup-divider{height:1px;background:var(--border);margin:1rem 0;}
+  .backup-file-label{
+    display:block;background:#0D0F17;border:1px dashed var(--border);color:var(--text-dim);
+    font-weight:700;font-size:.82rem;padding:.7rem;border-radius:10px;text-align:center;margin-bottom:.7rem;
+  }
+  .backup-file-label input{display:none;}
+  .backup-or{color:var(--text-faint);font-size:.72rem;text-align:center;margin-bottom:.6rem;}
+  .backup-textarea{
+    width:100%;height:4.5rem;background:#0D0F17;border:1px solid var(--border);color:var(--text);
+    font-family:inherit;font-size:.78rem;padding:.6rem;border-radius:10px;resize:vertical;margin-bottom:.7rem;
+  }
+  .backup-textarea:focus{outline:none;border-color:var(--accent);}
+
   /* ---- Weight input ---- */
   .weight-row{display:flex;gap:.6rem;align-items:stretch;}
   .weight-input{
@@ -973,6 +995,13 @@
   // First visit on a device (no saved data): show the welcome chooser
   // instead of silently seeding the example plan.
   var state = localStorage.getItem(STORE_KEY) ? loadState() : null;
+
+  // Ask the browser to keep this app's data persistent (reduces automatic
+  // eviction). Note: this does NOT survive the user deleting the app — that
+  // is why the Backup & Restore tools on the Log tab exist.
+  if(navigator.storage && navigator.storage.persist){
+    try{ navigator.storage.persist(); }catch(e){}
+  }
 
   function exampleState(){
     return {
@@ -2087,7 +2116,105 @@
       html += '</tbody></table></div>';
     }
 
+    html += buildBackupHtml();
+
     document.getElementById("content").innerHTML = html;
+    bindBackupEvents();
+  }
+
+  /* ===================== BACKUP & RESTORE ===================== */
+
+  function backupData(){ return localStorage.getItem(STORE_KEY) || JSON.stringify(state); }
+
+  function buildBackupHtml(){
+    var html = '<div class="section-title">Backup &amp; Restore</div>';
+    html += '<div class="card">';
+    html += '<div class="card-sub" style="margin-bottom:.85rem;line-height:1.5;">Your data lives only on this device. If the app is ever deleted your data goes with it — so save a backup and keep it somewhere safe. You can restore it here on any device.</div>';
+    html += '<div class="backup-btns">';
+    html += '<button class="backup-btn primary" id="backupCopy">Copy backup code</button>';
+    html += '<button class="backup-btn" id="backupDownload">Download file</button>';
+    if(navigator.share) html += '<button class="backup-btn" id="backupShare">Share…</button>';
+    html += '</div>';
+    html += '<div class="backup-flash" id="backupFlash"></div>';
+    html += '<div class="backup-divider"></div>';
+    html += '<div class="card-sub" style="margin-bottom:.6rem;">Restore from a backup — this replaces all current data:</div>';
+    html += '<label class="backup-file-label">Choose backup file<input type="file" accept="application/json,.json" id="backupFile"></label>';
+    html += '<div class="backup-or">or paste a backup code</div>';
+    html += '<textarea class="backup-textarea" id="backupPaste" placeholder="Paste backup code here"></textarea>';
+    html += '<button class="backup-btn primary" id="backupRestore">Restore from code</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function backupFlash(msg){
+    var el = document.getElementById("backupFlash");
+    if(el){ el.textContent = msg; setTimeout(function(){ if(el) el.textContent = ""; }, 3500); }
+  }
+
+  function applyRestore(text){
+    var parsed;
+    try{ parsed = JSON.parse(text); }
+    catch(e){ backupFlash("That doesn't look like a valid backup code."); return; }
+    if(!parsed || typeof parsed !== "object" || Array.isArray(parsed)){
+      backupFlash("That doesn't look like a valid backup."); return;
+    }
+    if(!window.confirm("Replace ALL current data on this device with this backup? This can't be undone.")) return;
+    localStorage.setItem(STORE_KEY, JSON.stringify(parsed));
+    location.reload();
+  }
+
+  function bindBackupEvents(){
+    var copyBtn = document.getElementById("backupCopy");
+    if(copyBtn) copyBtn.addEventListener("click", function(){
+      var text = backupData();
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(function(){
+          backupFlash("Backup code copied — paste it into Notes or email to keep it safe.");
+        }, function(){
+          var ta = document.getElementById("backupPaste"); if(ta){ ta.value = text; ta.focus(); ta.select(); }
+          backupFlash("Couldn't auto-copy — the code is shown below, select and copy it.");
+        });
+      } else {
+        var ta2 = document.getElementById("backupPaste"); if(ta2){ ta2.value = text; ta2.focus(); ta2.select(); }
+        backupFlash("Select the code shown below and copy it.");
+      }
+    });
+
+    var dlBtn = document.getElementById("backupDownload");
+    if(dlBtn) dlBtn.addEventListener("click", function(){
+      var text = backupData();
+      var blob = new Blob([text], {type:"application/json"});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = "warrior-fit-tracker-backup-"+todayStr()+".json";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
+      backupFlash("Backup file saved.");
+    });
+
+    var shareBtn = document.getElementById("backupShare");
+    if(shareBtn) shareBtn.addEventListener("click", function(){
+      var text = backupData();
+      navigator.share({ title:"Warrior Fit Tracker backup", text:text }).catch(function(){});
+    });
+
+    var fileInp = document.getElementById("backupFile");
+    if(fileInp) fileInp.addEventListener("change", function(){
+      var f = fileInp.files && fileInp.files[0];
+      if(!f) return;
+      var reader = new FileReader();
+      reader.onload = function(){ applyRestore(String(reader.result)); };
+      reader.onerror = function(){ backupFlash("Couldn't read that file."); };
+      reader.readAsText(f);
+    });
+
+    var restoreBtn = document.getElementById("backupRestore");
+    if(restoreBtn) restoreBtn.addEventListener("click", function(){
+      var ta = document.getElementById("backupPaste");
+      var text = ta ? ta.value.trim() : "";
+      if(!text){ backupFlash("Paste a backup code first."); return; }
+      applyRestore(text);
+    });
   }
 
   /* ===================== RENDER: PROGRESS ===================== */
