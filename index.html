@@ -472,6 +472,16 @@
   .ex-row-head{display:flex;justify-content:space-between;gap:.6rem;font-size:.83rem;}
   .ex-row-head .ex-name{color:var(--text);font-weight:600;}
   .ex-row-head .ex-scheme{color:var(--text-dim);font-size:.76rem;white-space:nowrap;flex-shrink:0;}
+  .week-bar{display:flex;align-items:center;gap:.7rem;margin-bottom:1rem;flex-wrap:wrap;}
+  .week-select{
+    background:var(--accent);color:#062019;border:none;border-radius:10px;
+    font-family:inherit;font-weight:800;font-size:1rem;padding:.55rem 2rem .55rem .8rem;
+    appearance:none;-webkit-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23062019' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right .55rem center;background-size:15px;
+  }
+  .week-select:focus{outline:none;}
+  .week-since{color:var(--text-faint);font-size:.72rem;}
   .ex-history{margin-top:.4rem;display:flex;flex-direction:column;gap:.15rem;}
   .ex-history-row{display:flex;gap:.6rem;font-size:.72rem;}
   .ex-history-date{color:var(--text-faint);width:3.4rem;flex-shrink:0;}
@@ -923,8 +933,42 @@
     }
     if(!s.notes) s.notes = clone(DEFAULT_NOTES);
     if(!s.exerciseLog) s.exerciseLog = {};
+    if(!s.weekLog) s.weekLog = {};
+    // Lifting is tracked by week-of-block. Anchor the block to the earliest
+    // logged session, or today for a fresh start.
+    if(!s.blockStart){
+      var earliest = null;
+      Object.keys(s.exerciseLog).forEach(function(name){
+        (s.exerciseLog[name]||[]).forEach(function(en){
+          if(en.date && (!earliest || en.date < earliest)) earliest = en.date;
+        });
+      });
+      s.blockStart = earliest || todayStr();
+    }
+    // liftV 1: fold any date-based exercise history into week buckets.
+    if(s.liftV !== 1){
+      Object.keys(s.exerciseLog).forEach(function(name){
+        var entries = (s.exerciseLog[name]||[]).slice().sort(function(a,b){ return a.date<b.date?-1:(a.date>b.date?1:0); });
+        entries.forEach(function(en){
+          if(!en.sets) return;
+          var wk = weekIndexOf(en.date, s.blockStart);
+          if(!s.weekLog[wk]) s.weekLog[wk] = {};
+          s.weekLog[wk][name] = en.sets; // later dates overwrite within a week
+        });
+      });
+      s.liftV = 1;
+    }
     return s;
   }
+
+  function weekIndexOf(dateStr, blockStart){
+    if(!dateStr || !blockStart) return 1;
+    var a = new Date(blockStart+"T00:00:00").getTime();
+    var b = new Date(dateStr+"T00:00:00").getTime();
+    var days = Math.floor((b - a)/(24*3600*1000));
+    return Math.max(1, Math.floor(days/7) + 1);
+  }
+  function currentWeek(){ return weekIndexOf(todayStr(), state.blockStart); }
 
   // First visit on a device (no saved data): show the welcome chooser
   // instead of silently seeding the example plan.
@@ -932,7 +976,7 @@
 
   function exampleState(){
     return {
-      daily:{}, exerciseLog:{}, engineV:2, splitV:2,
+      daily:{}, exerciseLog:{}, weekLog:{}, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
       meals: clone(DEFAULT_MEALS),
       training: clone(DEFAULT_TRAINING),
@@ -948,7 +992,7 @@
       training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
     }
     return {
-      daily:{}, exerciseLog:{}, engineV:2, splitV:2,
+      daily:{}, exerciseLog:{}, weekLog:{}, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: [],
       meals: meals,
       training: training,
@@ -1541,6 +1585,7 @@
 
   var openDays = {};
   var trainingEditMode = false;
+  var selectedWeek = null; // set to current week on first training render
 
   function parseSetCount(scheme){
     var m = /^(\d+)/.exec(scheme||"");
@@ -1554,23 +1599,30 @@
     return a;
   }
 
-  function getExerciseEntries(name){
-    if(!state.exerciseLog[name]) state.exerciseLog[name] = [];
-    return state.exerciseLog[name];
+  function getWeekSets(week, name){
+    return state.weekLog[week] ? state.weekLog[week][name] : null;
   }
 
-  function materializeTodayEntry(dayIdx, exIdx){
+  // ensure a sets array exists for this exercise in this week, and return it
+  function materializeWeekEntry(week, dayIdx, exIdx){
     var name = state.training[dayIdx].ex[exIdx][0];
     var scheme = state.training[dayIdx].ex[exIdx][1];
-    var entries = getExerciseEntries(name);
-    var ds = todayStr();
-    var entry = entries.find(function(e){ return e.date===ds; });
-    if(!entry){
-      entry = { date: ds, sets: blankSets(parseSetCount(scheme)) };
-      entries.push(entry);
-      entries.sort(function(a,b){ return a.date<b.date?-1:(a.date>b.date?1:0); });
-    }
-    return entry;
+    if(!state.weekLog[week]) state.weekLog[week] = {};
+    if(!state.weekLog[week][name]) state.weekLog[week][name] = blankSets(parseSetCount(scheme));
+    return state.weekLog[week][name];
+  }
+
+  // previous weeks (< week) that have logged data for this exercise, newest first
+  function weekHistory(name, week, count){
+    var out = [];
+    Object.keys(state.weekLog).map(Number)
+      .filter(function(w){ return w < week; })
+      .sort(function(a,b){ return b-a; })
+      .forEach(function(w){
+        var sets = state.weekLog[w][name];
+        if(sets && formatSetsSummary(sets)) out.push({ week:w, sets:sets });
+      });
+    return out.slice(0, count || 3);
   }
 
   function formatSetsSummary(sets){
@@ -1588,6 +1640,26 @@
         : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit')+
       '</button></div>';
     html += '<div class="page-sub">6-day split</div>';
+
+    if(selectedWeek == null) selectedWeek = currentWeek();
+    var cur = currentWeek();
+    if(!trainingEditMode){
+      var loggedWeeks = Object.keys(state.weekLog).map(Number);
+      var maxWeek = Math.max.apply(null, [cur, selectedWeek].concat(loggedWeeks.length?loggedWeeks:[1]));
+      var optCount = maxWeek + 1; // always offer one fresh week ahead
+      var blockStartLabel = fmtDate(state.blockStart);
+      html += '<div class="week-bar">';
+      html += '<select class="week-select" id="weekSelect">';
+      for(var wk=1; wk<=optCount; wk++){
+        var isCur = wk === cur;
+        var hasData = state.weekLog[wk] && Object.keys(state.weekLog[wk]).length;
+        var label = "Week " + wk + (isCur ? " (current)" : "") + (!isCur && hasData ? " ✓" : "");
+        html += '<option value="'+wk+'"'+(wk===selectedWeek?' selected':'')+'>'+label+'</option>';
+      }
+      html += '</select>';
+      html += '<span class="week-since">Block started '+blockStartLabel+'</span>';
+      html += '</div>';
+    }
 
     state.training.forEach(function(d, di){
       var isOpen = !!openDays[d.day];
@@ -1621,19 +1693,15 @@
       } else {
         d.ex.forEach(function(e, ei){
           var name = e[0], scheme = e[1];
-          var entries = state.exerciseLog[name] || [];
-          var ds = todayStr();
-          var todayEntry = entries.find(function(en){ return en.date===ds; });
-          var pastEntries = entries.filter(function(en){
-            return en.date !== ds && formatSetsSummary(en.sets);
-          }).slice(-3).reverse();
-          var rows = todayEntry ? todayEntry.sets : blankSets(parseSetCount(scheme));
+          var weekSets = getWeekSets(selectedWeek, name);
+          var pastEntries = weekHistory(name, selectedWeek, 3);
+          var rows = weekSets ? weekSets : blankSets(parseSetCount(scheme));
           html += '<div class="ex-block">';
           html += '<div class="ex-row-head"><span class="ex-name">'+esc(name)+'</span><span class="ex-scheme">'+esc(scheme)+'</span></div>';
           if(pastEntries.length){
             html += '<div class="ex-history">';
             pastEntries.forEach(function(en){
-              html += '<div class="ex-history-row"><span class="ex-history-date">'+fmtDate(en.date)+'</span><span class="ex-history-w">'+esc(formatSetsSummary(en.sets))+'</span></div>';
+              html += '<div class="ex-history-row"><span class="ex-history-date">Wk '+en.week+'</span><span class="ex-history-w">'+esc(formatSetsSummary(en.sets))+'</span></div>';
             });
             html += '</div>';
           }
@@ -1756,6 +1824,14 @@
         });
       }
     } else {
+      var weekSel = document.getElementById("weekSelect");
+      if(weekSel){
+        weekSel.addEventListener("change", function(){
+          selectedWeek = parseInt(weekSel.value,10);
+          renderTraining();
+        });
+      }
+
       document.querySelectorAll('.set-input').forEach(function(inp){
         inp.addEventListener("input", function(){
           var wrap = inp.closest(".set-rows");
@@ -1763,9 +1839,9 @@
           var ei = parseInt(wrap.getAttribute("data-ex-idx"),10);
           var si = parseInt(inp.getAttribute("data-set-idx"),10);
           var field = inp.getAttribute("data-field");
-          var entry = materializeTodayEntry(di, ei);
-          if(!entry.sets[si]) entry.sets[si] = {w:"", r:""};
-          entry.sets[si][field] = inp.value;
+          var sets = materializeWeekEntry(selectedWeek, di, ei);
+          if(!sets[si]) sets[si] = {w:"", r:""};
+          sets[si][field] = inp.value;
           saveState();
         });
       });
@@ -1774,8 +1850,8 @@
         btn.addEventListener("click", function(){
           var di = parseInt(btn.getAttribute("data-day-idx"),10);
           var ei = parseInt(btn.getAttribute("data-ex-idx"),10);
-          var entry = materializeTodayEntry(di, ei);
-          entry.sets.push({w:"", r:""});
+          var sets = materializeWeekEntry(selectedWeek, di, ei);
+          sets.push({w:"", r:""});
           saveState();
           renderTraining();
         });
@@ -1787,8 +1863,8 @@
           var di = parseInt(wrap.getAttribute("data-day-idx"),10);
           var ei = parseInt(wrap.getAttribute("data-ex-idx"),10);
           var si = parseInt(btn.getAttribute("data-set-idx"),10);
-          var entry = materializeTodayEntry(di, ei);
-          if(entry.sets.length > 1) entry.sets.splice(si,1);
+          var sets = materializeWeekEntry(selectedWeek, di, ei);
+          if(sets.length > 1) sets.splice(si,1);
           saveState();
           renderTraining();
         });
@@ -1889,14 +1965,22 @@
     state.training.forEach(function(d){
       d.ex.forEach(function(e){ if(!d.rest && names.indexOf(e[0]) < 0) names.push(e[0]); });
     });
-    Object.keys(state.exerciseLog).forEach(function(n){ if(names.indexOf(n) < 0) names.push(n); });
+    var weeks = Object.keys(state.weekLog).map(Number).sort(function(a,b){ return a-b; });
+    weeks.forEach(function(wk){
+      Object.keys(state.weekLog[wk]).forEach(function(n){ if(names.indexOf(n) < 0) names.push(n); });
+    });
 
     var lifts = [];
     names.forEach(function(name){
-      var entries = (state.exerciseLog[name] || []).filter(function(en){ return topWeight(en.sets) != null; });
-      if(entries.length){
-        var tops = entries.map(function(en){ return topWeight(en.sets); });
-        lifts.push({ name:name, entries:entries, tops:tops, trend: liftTrend(tops) });
+      var points = [];
+      weeks.forEach(function(wk){
+        var sets = state.weekLog[wk][name];
+        var t = sets ? topWeight(sets) : null;
+        if(t != null) points.push({ week: wk, top: t, sets: sets });
+      });
+      if(points.length){
+        var tops = points.map(function(p){ return p.top; });
+        lifts.push({ name:name, points:points, tops:tops, trend: liftTrend(tops) });
       }
     });
     return lifts;
@@ -2022,24 +2106,20 @@
 
   function getBlockLifts(weeks){
     var lifts = getLiftData();
-    var cutoff = null;
-    if(weeks > 0){
-      var t = new Date(todayStr()).getTime() - weeks*7*24*3600*1000;
-      cutoff = new Date(t).toISOString().slice(0,10);
-    }
+    var minWeek = weeks > 0 ? (currentWeek() - weeks + 1) : -Infinity;
     var out = [];
     lifts.forEach(function(l){
-      var entries = cutoff ? l.entries.filter(function(en){ return en.date >= cutoff; }) : l.entries;
-      if(!entries.length) return;
-      var tops = entries.map(function(en){ return topWeight(en.sets); });
+      var points = l.points.filter(function(p){ return p.week >= minWeek; });
+      if(!points.length) return;
+      var tops = points.map(function(p){ return p.top; });
       var start = tops[0], end = tops[tops.length-1];
       var change = end - start;
       var pct = start ? (change/start)*100 : 0;
       var dir = change >= 2.5 ? "up" : (change <= -2.5 ? "down" : "flat");
       out.push({
-        name: l.name, entries: entries, tops: tops,
+        name: l.name, points: points, tops: tops,
         start: start, end: end, change: change, pct: pct, dir: dir,
-        startDate: entries[0].date, endDate: entries[entries.length-1].date
+        startWeek: points[0].week, endWeek: points[points.length-1].week
       });
     });
     return out;
@@ -2058,7 +2138,7 @@
     html += '</div>';
 
     var lifts = getBlockLifts(progressWeeks);
-    var withChange = lifts.filter(function(l){ return l.entries.length >= 2; });
+    var withChange = lifts.filter(function(l){ return l.points.length >= 2; });
 
     if(!lifts.length){
       html += '<div class="card"><div class="empty-hint">No lifts logged in this window. Enter weights on the Training tab, then come back to see your block progression.</div></div>';
@@ -2076,12 +2156,12 @@
     else if(downs > ups){ verdict = "Losing ground"; vClass = "trend-down"; }
     else { verdict = "Holding steady"; vClass = "trend-flat"; }
 
-    var allDates = [];
-    lifts.forEach(function(l){ allDates.push(l.startDate, l.endDate); });
-    allDates.sort();
-    var blockStart = allDates[0], blockEnd = allDates[allDates.length-1];
-    var spanWeeks = weeksBetween(blockStart, blockEnd);
-    var totalSessions = lifts.reduce(function(s,l){ return s + l.entries.length; }, 0);
+    var allWeeks = [];
+    lifts.forEach(function(l){ allWeeks.push(l.startWeek, l.endWeek); });
+    allWeeks.sort(function(a,b){ return a-b; });
+    var firstWeek = allWeeks[0], lastWeek = allWeeks[allWeeks.length-1];
+    var spanWeeks = lastWeek - firstWeek + 1;
+    var totalSessions = lifts.reduce(function(s,l){ return s + l.points.length; }, 0);
     var avgPct = withChange.length ? withChange.reduce(function(s,l){ return s+l.pct; },0)/withChange.length : 0;
 
     html += '<div class="card analysis-card">';
@@ -2089,19 +2169,19 @@
     html += '<div class="analysis-verdict '+vClass+'">'+verdict+'</div>';
     var summary;
     if(withChange.length){
-      summary = "Across " + (spanWeeks<1?"under a week":spanWeeks+" week"+(spanWeeks===1?"":"s")) +
+      summary = "Across " + spanWeeks + " week" + (spanWeeks===1?"":"s") +
         " and " + totalSessions + " logged session" + (totalSessions===1?"":"s") + ", " +
         ups + " of " + withChange.length + " lift" + (withChange.length===1?"":"s") + " went up" +
         (avgPct!==0 ? " — averaging " + (avgPct>0?"+":"") + round1(avgPct) + "% per lift." : ".");
     } else {
-      summary = "Logged " + totalSessions + " session" + (totalSessions===1?"":"s") +
-        " so far. Log each lift on a second date to measure change.";
+      summary = "Logged " + totalSessions + " week" + (totalSessions===1?"":"s") +
+        " so far. Fill in a second week to measure change.";
     }
     html += '<div class="analysis-verdict-sub">'+summary+'</div>';
 
-    html += '<div class="analysis-row"><span class="analysis-label">Block window</span><span class="analysis-val">'+fmtDate(blockStart)+' → '+fmtDate(blockEnd)+'</span></div>';
+    html += '<div class="analysis-row"><span class="analysis-label">Block window</span><span class="analysis-val">Wk '+firstWeek+' → Wk '+lastWeek+'</span></div>';
     html += '<div class="analysis-row"><span class="analysis-label">Exercises tracked</span><span class="analysis-val">'+lifts.length+'</span></div>';
-    html += '<div class="analysis-row"><span class="analysis-label">Sessions logged</span><span class="analysis-val">'+totalSessions+'</span></div>';
+    html += '<div class="analysis-row"><span class="analysis-label">Weeks logged</span><span class="analysis-val">'+totalSessions+'</span></div>';
 
     if(withChange.length){
       var best = null, worst = null;
@@ -2120,18 +2200,18 @@
       html += '<div class="card block-lift">';
       html += '<div class="block-lift-head"><span class="block-lift-name">'+esc(l.name)+'</span>'+trendBadgeHtml({dir:l.dir})+'</div>';
       html += '<div class="block-lift-body">';
-      html += '<div class="block-endpoint"><div class="block-ep-w">'+round1(l.start)+'<small> lb</small></div><div class="block-ep-l">'+fmtDate(l.startDate)+'</div></div>';
+      html += '<div class="block-endpoint"><div class="block-ep-w">'+round1(l.start)+'<small> lb</small></div><div class="block-ep-l">Wk '+l.startWeek+'</div></div>';
       html += '<div class="block-arrow">';
-      if(l.entries.length >= 2){
+      if(l.points.length >= 2){
         var deltaCls = l.dir==="up" ? "trend-up" : (l.dir==="down" ? "trend-down" : "");
         html += '<div class="block-delta '+deltaCls+'">'+(l.change>0?"+":"")+round1(l.change)+' lb</div>';
         html += '<div class="block-arrow-line">'+buildSparkSVG(l.tops)+'</div>';
         html += '<div class="block-pct '+deltaCls+'">'+(l.pct>0?"+":"")+round1(l.pct)+'%</div>';
       } else {
-        html += '<div class="block-arrow-line block-single">1 session</div>';
+        html += '<div class="block-arrow-line block-single">1 week</div>';
       }
       html += '</div>';
-      html += '<div class="block-endpoint"><div class="block-ep-w">'+round1(l.end)+'<small> lb</small></div><div class="block-ep-l">'+fmtDate(l.endDate)+'</div></div>';
+      html += '<div class="block-endpoint"><div class="block-ep-w">'+round1(l.end)+'<small> lb</small></div><div class="block-ep-l">Wk '+l.endWeek+'</div></div>';
       html += '</div>';
       html += '</div>';
     });
