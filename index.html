@@ -578,7 +578,7 @@
       search_simple: "1",
       action: "process",
       json: "1",
-      page_size: "5",
+      page_size: "10",
       fields: "product_name,nutriments"
     });
     var url = "https://world.openfoodfacts.org/cgi/search.pl?" + params.toString();
@@ -587,19 +587,33 @@
       return res.json();
     }).then(function(data){
       var products = (data && data.products) || [];
-      // first product with usable per-100g macro data wins
-      for(var i=0;i<products.length;i++){
-        var n = products[i].nutriments || {};
+      var qTokens = tokenize(query);
+      // among products with usable per-100g data, pick the one whose name
+      // best overlaps the query (first result is often an unrelated brand)
+      var best = null, bestScore = -1;
+      products.forEach(function(prod, idx){
+        var n = prod.nutriments || {};
         var p = parseFloat(n.proteins_100g), c = parseFloat(n.carbohydrates_100g), f = parseFloat(n.fat_100g);
-        if(!isNaN(p) || !isNaN(c) || !isNaN(f)){
-          return {
-            description: (products[i].product_name || query) + " (Open Food Facts)",
-            per100: { p: isNaN(p)?0:p, c: isNaN(c)?0:c, f: isNaN(f)?0:f },
-            source: "off"
-          };
+        if(isNaN(p) && isNaN(c) && isNaN(f)) return;
+        var nameTokens = tokenize(prod.product_name || "");
+        var hits = 0;
+        qTokens.forEach(function(qt){
+          if(nameTokens.some(function(nt){ return nt === qt || nt.indexOf(qt) === 0 || qt.indexOf(nt) === 0; })) hits++;
+        });
+        var coverage = qTokens.length ? hits/qTokens.length : 0;
+        // shorter names are usually the plainer, more generic product
+        var score = coverage*10 - nameTokens.length*0.1 - idx*0.05;
+        if(score > bestScore){
+          bestScore = score;
+          best = { p:isNaN(p)?0:p, c:isNaN(c)?0:c, f:isNaN(f)?0:f, name: prod.product_name || query };
         }
-      }
-      return null;
+      });
+      if(!best) return null;
+      return {
+        description: best.name + " (Open Food Facts)",
+        per100: { p: best.p, c: best.c, f: best.f },
+        source: "off"
+      };
     });
   }
 
@@ -730,6 +744,18 @@
     if(!s.weights) s.weights = SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; });
     if(!s.meals) s.meals = clone(DEFAULT_MEALS);
     s.meals = migrateMeals(s.meals);
+    // engine v2 = built-in table + Open Food Facts. Re-resolve every auto
+    // ingredient once so matches picked by the old USDA engine get replaced.
+    // Old per100 values are kept until the fresh result lands, so totals
+    // never flash to zero.
+    if(s.engineV !== 2){
+      s.meals.forEach(function(m){
+        m.items.forEach(function(item){
+          if(item.mode === "auto") item.status = "pending";
+        });
+      });
+      s.engineV = 2;
+    }
     if(!s.training) s.training = clone(DEFAULT_TRAINING);
     if(!s.notes) s.notes = clone(DEFAULT_NOTES);
     if(!s.exerciseLog) s.exerciseLog = {};
