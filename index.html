@@ -444,10 +444,13 @@
   }
 
   function mealTotals(m){
+    // Sum whole-gram ingredient contributions (the same rounded values the
+    // UI shows per ingredient) so ingredients always add up exactly to the
+    // meal chips, and meals add up exactly to the daily strip.
     var t = {p:0, c:0, f:0};
     m.items.forEach(function(item){
       var c = ingredientContribution(item);
-      t.p += c.p; t.c += c.c; t.f += c.f;
+      t.p += Math.round(c.p); t.c += Math.round(c.c); t.f += Math.round(c.f);
     });
     t.kcal = t.p*4 + t.c*4 + t.f*9;
     return t;
@@ -930,7 +933,8 @@
     if(item.status === "pending") return "Looking up macros…";
     if(item.status === "ok"){
       var c = ingredientContribution(item);
-      return (item.matchDesc || "Matched") + " · " + Math.round(c.p)+"P "+Math.round(c.c)+"C "+Math.round(c.f)+"F · "+Math.round(c.p*4+c.c*4+c.f*9)+" kcal";
+      var rp = Math.round(c.p), rc = Math.round(c.c), rf = Math.round(c.f);
+      return (item.matchDesc || "Matched") + " · " + rp+"P "+rc+"C "+rf+"F · "+(rp*4+rc*4+rf*9)+" kcal";
     }
     if(item.status === "unmatched") return "No match found — try a simpler name, or switch to Manual";
     if(item.status === "error") return "Lookup failed — check connection and retry";
@@ -1119,14 +1123,14 @@
           '<span class="macro-chip f" data-meal-f>F '+Math.round(mt.f)+'g</span>'+
           '</div>';
       } else {
-        html += '<div class="card-title"><span>'+esc(m.name)+' &middot; '+esc(m.sub)+'</span><span class="kcal-tag">'+Math.round(mt.kcal)+' kcal</span></div>';
+        html += '<div class="card-title"><span>'+esc(m.name)+' &middot; '+esc(m.sub)+'</span><span class="kcal-tag" data-meal-kcal>'+Math.round(mt.kcal)+' kcal</span></div>';
         html += '<ul class="ingredient-list">';
         m.items.forEach(function(item){ html += '<li>'+esc(formatIngredientLine(item))+'</li>'; });
         html += '</ul>';
         html += '<div class="diet-macros">'+
-          '<span class="macro-chip p">P '+Math.round(mt.p)+'g</span>'+
-          '<span class="macro-chip c">C '+Math.round(mt.c)+'g</span>'+
-          '<span class="macro-chip f">F '+Math.round(mt.f)+'g</span>'+
+          '<span class="macro-chip p" data-meal-p>P '+Math.round(mt.p)+'g</span>'+
+          '<span class="macro-chip c" data-meal-c>C '+Math.round(mt.c)+'g</span>'+
+          '<span class="macro-chip f" data-meal-f>F '+Math.round(mt.f)+'g</span>'+
           '</div>';
         if(quickAddMi === mi){
           html += '<div class="ing-row-top quick-add-row">'+
