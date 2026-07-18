@@ -82,12 +82,13 @@
     border:none;
     color:var(--text-faint);
     font-family:inherit;
-    font-size:.68rem;
+    font-size:.64rem;
     font-weight:600;
     padding:.4rem 0 .3rem;
     border-radius:10px;
+    min-width:0;
   }
-  .tabbtn svg{width:22px;height:22px;}
+  .tabbtn svg{width:21px;height:21px;}
   .tabbtn.active{color:var(--accent);}
   .tabbtn:active{background:rgba(255,255,255,0.04);}
 
@@ -288,6 +289,30 @@
   .analysis-val{font-weight:700;text-align:right;font-variant-numeric:tabular-nums;}
   .analysis-val.trend-up{color:var(--accent);}
   .analysis-val.trend-down{color:var(--fat);}
+
+  /* ---- Progress tab ---- */
+  .block-selector{display:flex;gap:.5rem;margin-bottom:1rem;}
+  .block-chip{
+    flex:1;background:var(--card);border:1px solid var(--border);color:var(--text-dim);
+    font-family:inherit;font-weight:700;font-size:.8rem;padding:.6rem 0;border-radius:10px;
+  }
+  .block-chip.active{background:var(--accent);border-color:var(--accent);color:#062019;}
+  .block-lift{padding:.9rem 1rem;}
+  .block-lift-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.7rem;}
+  .block-lift-name{font-weight:700;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .block-lift-body{display:flex;align-items:center;gap:.5rem;}
+  .block-endpoint{flex-shrink:0;text-align:center;min-width:3.6rem;}
+  .block-ep-w{font-size:1.15rem;font-weight:800;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;}
+  .block-ep-w small{font-size:.6rem;color:var(--text-dim);font-weight:600;}
+  .block-ep-l{font-size:.64rem;color:var(--text-faint);margin-top:.15rem;}
+  .block-arrow{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:.15rem;}
+  .block-delta{font-size:.78rem;font-weight:800;}
+  .block-pct{font-size:.66rem;font-weight:700;}
+  .block-delta.trend-up,.block-pct.trend-up{color:var(--accent);}
+  .block-delta.trend-down,.block-pct.trend-down{color:var(--fat);}
+  .block-arrow-line{width:100%;display:flex;justify-content:center;}
+  .block-arrow-line svg{width:100%;max-width:110px;height:26px;}
+  .block-single{color:var(--text-faint);font-size:.72rem;}
   .lift-spark{flex-shrink:0;display:flex;align-items:center;}
   .lift-latest{flex-shrink:0;font-weight:800;font-size:1.05rem;font-variant-numeric:tabular-nums;min-width:3.2rem;text-align:right;}
   .lift-latest small{font-size:.65rem;color:var(--text-dim);font-weight:600;}
@@ -443,6 +468,10 @@
     <button class="tabbtn" data-tab="training">
       <svg viewBox="0 0 24 24" fill="currentColor"><rect x="1" y="9.5" width="3.5" height="5" rx="1"/><rect x="19.5" y="9.5" width="3.5" height="5" rx="1"/><rect x="5.5" y="8" width="2.8" height="8" rx="1"/><rect x="15.7" y="8" width="2.8" height="8" rx="1"/><rect x="8.3" y="11" width="7.4" height="2" rx="0.5"/></svg>
       Training
+    </button>
+    <button class="tabbtn" data-tab="progress">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 16 8.5 11 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+      Progress
     </button>
     <button class="tabbtn" data-tab="log">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
@@ -1785,107 +1814,13 @@
     return '<span class="trend-badge trend-flat">&#8212; Steady</span>';
   }
 
-  function buildAnalysisHtml(sortedWeights, lifts){
-    var trendable = lifts.filter(function(l){ return l.trend; });
-    var hasBodyweight = sortedWeights.length >= 2;
-    if(!trendable.length && !hasBodyweight) return "";
-
-    var html = '<div class="card analysis-card">';
-    html += '<div class="card-title">Analysis</div>';
-
-    if(trendable.length){
-      var ups = trendable.filter(function(l){ return l.trend.dir === "up"; }).length;
-      var downs = trendable.filter(function(l){ return l.trend.dir === "down"; }).length;
-      var verdict, vClass;
-      if(ups > downs){ verdict = "Getting stronger"; vClass = "trend-up"; }
-      else if(downs > ups){ verdict = "Getting weaker"; vClass = "trend-down"; }
-      else { verdict = "Maintaining"; vClass = "trend-flat"; }
-      html += '<div class="analysis-verdict '+vClass+'">'+verdict+'</div>';
-      html += '<div class="analysis-verdict-sub">'+ups+' of '+trendable.length+' tracked lifts trending up over recent sessions</div>';
-
-      var avgChange = trendable.reduce(function(s,l){ return s + l.trend.change; }, 0) / trendable.length;
-      var totalSessions = lifts.reduce(function(s,l){ return s + l.entries.length; }, 0);
-      html += '<div class="analysis-row"><span class="analysis-label">Avg recent change per lift</span><span class="analysis-val '+(avgChange>=2.5?"trend-up":(avgChange<=-2.5?"trend-down":""))+'">'+(avgChange>0?"+":"")+round1(avgChange)+' lb</span></div>';
-      html += '<div class="analysis-row"><span class="analysis-label">Lifting sessions logged</span><span class="analysis-val">'+totalSessions+'</span></div>';
-
-      var best = null, worst = null;
-      trendable.forEach(function(l){
-        if(l.trend.change > 0 && (!best || l.trend.change > best.trend.change)) best = l;
-        if(l.trend.change < 0 && (!worst || l.trend.change < worst.trend.change)) worst = l;
-      });
-      if(best) html += '<div class="analysis-row"><span class="analysis-label">Most improved</span><span class="analysis-val trend-up">'+esc(best.name)+' +'+round1(best.trend.change)+'</span></div>';
-      if(worst) html += '<div class="analysis-row"><span class="analysis-label">Needs attention</span><span class="analysis-val trend-down">'+esc(worst.name)+' '+round1(worst.trend.change)+'</span></div>';
-    } else {
-      html += '<div class="analysis-verdict-sub">Log lift weights on the Training tab across a few sessions to get a strength trend.</div>';
-    }
-
-    if(hasBodyweight){
-      var latest = sortedWeights[sortedWeights.length-1];
-      var latestTime = new Date(latest.date).getTime();
-      var windowStart = latestTime - 30*24*3600*1000;
-      var inWindow = sortedWeights.filter(function(w){ return new Date(w.date).getTime() >= windowStart; });
-      var base = inWindow.length >= 2 ? inWindow[0] : sortedWeights[sortedWeights.length-2];
-      var bwDelta = latest.weight - base.weight;
-      var label = inWindow.length >= 2 ? "Bodyweight (last 30 days)" : "Bodyweight (since prior entry)";
-      html += '<div class="analysis-row"><span class="analysis-label">'+label+'</span><span class="analysis-val">'+(bwDelta>0?"+":"")+round1(bwDelta)+' lb</span></div>';
-    }
-
-    html += '</div>';
-    return html;
-  }
-
-  function buildLiftingHtml(lifts){
-    var html = '<div class="section-title">Lifting Progress</div>';
-    if(!lifts.length){
-      html += '<div class="card"><div class="empty-hint">No lifts logged yet. Enter weights on the Training tab and each exercise\'s progression will show up here.</div></div>';
-      return html;
-    }
-
-    lifts.forEach(function(l){
-      var tops = l.tops;
-      var latestTop = tops[tops.length-1];
-      var firstTop = tops[0];
-      var change = latestTop - firstTop;
-      var changeHtml = "";
-      if(l.entries.length > 1 && change !== 0){
-        var cls = change > 0 ? "gain" : "loss";
-        changeHtml = '<span class="lift-change '+cls+'">'+(change>0?"+":"")+round1(change)+' overall</span>';
-      }
-      var isOpen = !!openLifts[l.name];
-      html += '<div class="card lift-card'+(isOpen?' open':'')+'" data-lift="'+escAttr(l.name)+'">';
-      html += '<div class="lift-head">';
-      html += '<div class="lift-name-wrap"><div class="lift-name">'+esc(l.name)+'</div>'+
-        '<div class="lift-sub">'+trendBadgeHtml(l.trend)+'<span class="lift-sub-meta">'+l.entries.length+' session'+(l.entries.length===1?'':'s')+(changeHtml?' &middot; '+changeHtml:'')+'</span></div></div>';
-      html += '<div class="lift-spark">'+buildSparkSVG(tops)+'</div>';
-      html += '<div class="lift-latest">'+round1(latestTop)+'<small> lb</small></div>';
-      html += '</div>';
-      if(isOpen){
-        html += '<div class="lift-hist">';
-        l.entries.slice().reverse().forEach(function(en, i, arr){
-          var prev = arr[i+1];
-          var d = prev ? topWeight(en.sets) - topWeight(prev.sets) : null;
-          var dHtml = "";
-          if(d != null && d !== 0) dHtml = '<span class="lift-change '+(d>0?"gain":"loss")+'">'+(d>0?"+":"")+round1(d)+'</span>';
-          html += '<div class="lift-hist-row">'+
-            '<span class="lift-hist-date">'+fmtDate(en.date)+'</span>'+
-            '<span class="lift-hist-w">'+esc(formatSetsSummary(en.sets))+'</span>'+
-            '<span class="lift-hist-delta">'+dHtml+'</span>'+
-            '</div>';
-        });
-        html += '</div>';
-      }
-      html += '</div>';
-    });
-    return html;
-  }
-
   function renderLog(){
     var sorted = state.weights.slice().sort(function(a,b){ return a.date < b.date ? -1 : (a.date>b.date?1:0); });
     var ds = todayStr();
 
     var html = '';
     html += '<div class="page-title">Log</div>';
-    html += '<div class="page-sub">Bodyweight &amp; lifting history</div>';
+    html += '<div class="page-sub">Bodyweight history</div>';
 
     if(sorted.length === 0){
       html += '<div class="card"><div class="empty-hint">No weigh-ins yet. Save one from the Today tab.</div></div>';
@@ -1923,25 +1858,156 @@
       html += '</tbody></table></div>';
     }
 
+    document.getElementById("content").innerHTML = html;
+  }
+
+  /* ===================== RENDER: PROGRESS ===================== */
+
+  var progressWeeks = 12; // 0 = all time
+
+  function fmtLongDate(dateStr){
+    var parts = dateStr.split("-");
+    var d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    return d.toLocaleDateString(undefined, {month:"short", day:"numeric", year:"numeric"});
+  }
+
+  function weeksBetween(a, b){
+    return Math.round((new Date(b).getTime() - new Date(a).getTime()) / (7*24*3600*1000));
+  }
+
+  function getBlockLifts(weeks){
     var lifts = getLiftData();
-    html += buildAnalysisHtml(sorted, lifts);
-    html += buildLiftingHtml(lifts);
+    var cutoff = null;
+    if(weeks > 0){
+      var t = new Date(todayStr()).getTime() - weeks*7*24*3600*1000;
+      cutoff = new Date(t).toISOString().slice(0,10);
+    }
+    var out = [];
+    lifts.forEach(function(l){
+      var entries = cutoff ? l.entries.filter(function(en){ return en.date >= cutoff; }) : l.entries;
+      if(!entries.length) return;
+      var tops = entries.map(function(en){ return topWeight(en.sets); });
+      var start = tops[0], end = tops[tops.length-1];
+      var change = end - start;
+      var pct = start ? (change/start)*100 : 0;
+      var dir = change >= 2.5 ? "up" : (change <= -2.5 ? "down" : "flat");
+      out.push({
+        name: l.name, entries: entries, tops: tops,
+        start: start, end: end, change: change, pct: pct, dir: dir,
+        startDate: entries[0].date, endDate: entries[entries.length-1].date
+      });
+    });
+    return out;
+  }
+
+  function renderProgress(){
+    var html = '';
+    html += '<div class="page-title">Progress</div>';
+    html += '<div class="page-sub">Strength across your training block</div>';
+
+    var opts = [[4,"4 wk"],[8,"8 wk"],[12,"12 wk"],[0,"All"]];
+    html += '<div class="block-selector">';
+    opts.forEach(function(o){
+      html += '<button class="block-chip'+(progressWeeks===o[0]?' active':'')+'" data-weeks="'+o[0]+'">'+o[1]+'</button>';
+    });
+    html += '</div>';
+
+    var lifts = getBlockLifts(progressWeeks);
+    var withChange = lifts.filter(function(l){ return l.entries.length >= 2; });
+
+    if(!lifts.length){
+      html += '<div class="card"><div class="empty-hint">No lifts logged in this window. Enter weights on the Training tab, then come back to see your block progression.</div></div>';
+      document.getElementById("content").innerHTML = html;
+      bindProgressEvents();
+      return;
+    }
+
+    // ----- headline analysis -----
+    var ups = withChange.filter(function(l){ return l.dir==="up"; }).length;
+    var downs = withChange.filter(function(l){ return l.dir==="down"; }).length;
+    var verdict, vClass;
+    if(!withChange.length){ verdict = "Just getting started"; vClass = "trend-flat"; }
+    else if(ups > downs){ verdict = "Getting stronger"; vClass = "trend-up"; }
+    else if(downs > ups){ verdict = "Losing ground"; vClass = "trend-down"; }
+    else { verdict = "Holding steady"; vClass = "trend-flat"; }
+
+    var allDates = [];
+    lifts.forEach(function(l){ allDates.push(l.startDate, l.endDate); });
+    allDates.sort();
+    var blockStart = allDates[0], blockEnd = allDates[allDates.length-1];
+    var spanWeeks = weeksBetween(blockStart, blockEnd);
+    var totalSessions = lifts.reduce(function(s,l){ return s + l.entries.length; }, 0);
+    var avgPct = withChange.length ? withChange.reduce(function(s,l){ return s+l.pct; },0)/withChange.length : 0;
+
+    html += '<div class="card analysis-card">';
+    html += '<div class="card-title">Block Analysis</div>';
+    html += '<div class="analysis-verdict '+vClass+'">'+verdict+'</div>';
+    var summary;
+    if(withChange.length){
+      summary = "Across " + (spanWeeks<1?"under a week":spanWeeks+" week"+(spanWeeks===1?"":"s")) +
+        " and " + totalSessions + " logged session" + (totalSessions===1?"":"s") + ", " +
+        ups + " of " + withChange.length + " lift" + (withChange.length===1?"":"s") + " went up" +
+        (avgPct!==0 ? " — averaging " + (avgPct>0?"+":"") + round1(avgPct) + "% per lift." : ".");
+    } else {
+      summary = "Logged " + totalSessions + " session" + (totalSessions===1?"":"s") +
+        " so far. Log each lift on a second date to measure change.";
+    }
+    html += '<div class="analysis-verdict-sub">'+summary+'</div>';
+
+    html += '<div class="analysis-row"><span class="analysis-label">Block window</span><span class="analysis-val">'+fmtDate(blockStart)+' → '+fmtDate(blockEnd)+'</span></div>';
+    html += '<div class="analysis-row"><span class="analysis-label">Exercises tracked</span><span class="analysis-val">'+lifts.length+'</span></div>';
+    html += '<div class="analysis-row"><span class="analysis-label">Sessions logged</span><span class="analysis-val">'+totalSessions+'</span></div>';
+
+    if(withChange.length){
+      var best = null, worst = null;
+      withChange.forEach(function(l){
+        if(l.change>0 && (!best || l.change>best.change)) best = l;
+        if(l.change<0 && (!worst || l.change<worst.change)) worst = l;
+      });
+      if(best) html += '<div class="analysis-row"><span class="analysis-label">Biggest gain</span><span class="analysis-val trend-up">'+esc(best.name)+' +'+round1(best.change)+' lb</span></div>';
+      if(worst) html += '<div class="analysis-row"><span class="analysis-label">Biggest drop</span><span class="analysis-val trend-down">'+esc(worst.name)+' '+round1(worst.change)+' lb</span></div>';
+    }
+    html += '</div>';
+
+    // ----- per-lift start -> end cards -----
+    html += '<div class="section-title">Start &rarr; Now</div>';
+    lifts.forEach(function(l){
+      html += '<div class="card block-lift">';
+      html += '<div class="block-lift-head"><span class="block-lift-name">'+esc(l.name)+'</span>'+trendBadgeHtml({dir:l.dir})+'</div>';
+      html += '<div class="block-lift-body">';
+      html += '<div class="block-endpoint"><div class="block-ep-w">'+round1(l.start)+'<small> lb</small></div><div class="block-ep-l">'+fmtDate(l.startDate)+'</div></div>';
+      html += '<div class="block-arrow">';
+      if(l.entries.length >= 2){
+        var deltaCls = l.dir==="up" ? "trend-up" : (l.dir==="down" ? "trend-down" : "");
+        html += '<div class="block-delta '+deltaCls+'">'+(l.change>0?"+":"")+round1(l.change)+' lb</div>';
+        html += '<div class="block-arrow-line">'+buildSparkSVG(l.tops)+'</div>';
+        html += '<div class="block-pct '+deltaCls+'">'+(l.pct>0?"+":"")+round1(l.pct)+'%</div>';
+      } else {
+        html += '<div class="block-arrow-line block-single">1 session</div>';
+      }
+      html += '</div>';
+      html += '<div class="block-endpoint"><div class="block-ep-w">'+round1(l.end)+'<small> lb</small></div><div class="block-ep-l">'+fmtDate(l.endDate)+'</div></div>';
+      html += '</div>';
+      html += '</div>';
+    });
 
     document.getElementById("content").innerHTML = html;
+    bindProgressEvents();
+  }
 
-    document.querySelectorAll(".lift-card").forEach(function(el){
-      el.querySelector(".lift-head").addEventListener("click", function(){
-        var name = el.getAttribute("data-lift");
-        openLifts[name] = !openLifts[name];
-        renderLog();
+  function bindProgressEvents(){
+    document.querySelectorAll(".block-chip").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        progressWeeks = parseInt(btn.getAttribute("data-weeks"),10);
+        renderProgress();
       });
     });
   }
 
   /* ===================== TAB CONTROL ===================== */
 
-  var TABS = { today: renderToday, diet: renderDiet, training: renderTraining, log: renderLog };
-  var TAB_ORDER = ["today","diet","training","log"];
+  var TABS = { today: renderToday, diet: renderDiet, training: renderTraining, progress: renderProgress, log: renderLog };
+  var TAB_ORDER = ["today","diet","training","progress","log"];
   var LAST_TAB_KEY = "fittrack.lastTab";
 
   function switchTab(name){
