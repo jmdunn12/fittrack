@@ -1,6 +1,6 @@
 {
-  "name": "FitTrack",
-  "short_name": "FitTrack",
+  "name": "Warrior Fit Tracker",
+  "short_name": "Warrior Fit Tracker",
   "description": "Personal nutrition, training, and bodyweight tracker",
   "start_url": "./index.html",
   "scope": "./",
