@@ -233,6 +233,32 @@
   }
   .backup-textarea:focus{outline:none;border-color:var(--accent);}
 
+  /* ---- Steps × Weight insight ---- */
+  .insight-row{display:flex;align-items:baseline;gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--border);}
+  .insight-row:last-child{border-bottom:none;}
+  .insight-wk{width:3rem;flex-shrink:0;font-weight:700;font-size:.8rem;}
+  .insight-steps{flex:1;color:var(--text-dim);font-size:.8rem;font-variant-numeric:tabular-nums;}
+  .insight-chg{flex-shrink:0;font-weight:800;font-size:.82rem;font-variant-numeric:tabular-nums;}
+  .sync-steps{margin:.2rem 0 0;padding-left:1.2rem;}
+  .sync-steps li{font-size:.82rem;color:var(--text);margin-bottom:.5rem;line-height:1.45;}
+  .sync-steps li:last-child{margin-bottom:0;}
+  .sync-steps code{
+    background:#0D0F17;border:1px solid var(--border);border-radius:6px;
+    padding:.1rem .35rem;font-size:.74rem;color:var(--accent);
+    word-break:break-all;display:inline-block;
+  }
+
+  /* ---- Toast ---- */
+  .toast{
+    position:fixed;left:50%;transform:translate(-50%, 1rem);
+    bottom:calc(6rem + var(--safe-b));
+    background:var(--accent);color:#062019;font-weight:800;font-size:.85rem;
+    padding:.7rem 1.1rem;border-radius:12px;z-index:100;max-width:88%;text-align:center;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);opacity:0;transition:opacity .3s, transform .3s;
+    pointer-events:none;
+  }
+  .toast.show{opacity:1;transform:translate(-50%, 0);}
+
   /* ---- Weight input ---- */
   .weight-row{display:flex;gap:.6rem;align-items:stretch;}
   .weight-input{
@@ -1074,11 +1100,81 @@
     saveState();
   }
 
+  var STEP_GOAL = 10000;
+
+  function setSteps(dateStr, steps){
+    var d = getDay(dateStr);
+    d.steps = steps;
+    saveState();
+  }
+
+  /* ===================== APPLE HEALTH IMPORT ===================== */
+  // Data is fed in by an Apple Shortcut that reads steps + weight from
+  // Health/Apple Watch and opens the app with a "#health=..." payload, or
+  // by pasting the same payload on the Log tab. Format (fields optional):
+  //   D:2026-07-18;S:8231;W:199.5   (multiple days joined by "|")
+
+  function importHealthString(payload){
+    if(!payload) return 0;
+    var count = 0;
+    String(payload).split("|").forEach(function(entry){
+      var fields = {};
+      entry.split(";").forEach(function(kv){
+        var idx = kv.indexOf(":");
+        if(idx < 0) return;
+        fields[kv.slice(0,idx).trim().toUpperCase()] = kv.slice(idx+1).trim();
+      });
+      var date = fields.D || todayStr();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = todayStr();
+      var did = false;
+      if(fields.S != null && fields.S !== ""){
+        var s = parseInt(fields.S.replace(/[,\s]/g,""), 10);
+        if(!isNaN(s) && s >= 0){ setSteps(date, s); did = true; }
+      }
+      if(fields.W != null && fields.W !== ""){
+        var w = parseFloat(fields.W);
+        if(!isNaN(w) && w > 0){ setWeight(date, w); getDay(date).weight = w; did = true; }
+      }
+      if(did) count++;
+    });
+    if(count) saveState();
+    return count;
+  }
+
+  function ingestHealthHash(){
+    var h = location.hash || "";
+    var m = /(?:^#|&)health=([^&]+)/.exec(h);
+    if(!m) return 0;
+    var applied = 0;
+    try{ applied = importHealthString(decodeURIComponent(m[1])); }catch(e){ applied = 0; }
+    // strip the payload so a manual refresh doesn't re-import
+    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+    return applied;
+  }
+
+  function showToast(msg){
+    var t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    requestAnimationFrame(function(){ t.classList.add("show"); });
+    setTimeout(function(){ t.classList.remove("show"); setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 300); }, 3200);
+  }
+
   /* ===================== HELPERS ===================== */
 
   function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
   function clampInt(n,a,b){ return Math.max(a, Math.min(b, Math.round(n))); }
   function round1(n){ return Math.round(n*10)/10; }
+  function mean(arr){ return arr.length ? arr.reduce(function(s,v){ return s+v; },0)/arr.length : 0; }
+  function pearson(xs, ys){
+    var n = xs.length;
+    if(n < 2) return 0;
+    var mx = mean(xs), my = mean(ys), num=0, dx=0, dy=0;
+    for(var i=0;i<n;i++){ var a=xs[i]-mx, b=ys[i]-my; num+=a*b; dx+=a*a; dy+=b*b; }
+    if(dx===0 || dy===0) return 0;
+    return num/Math.sqrt(dx*dy);
+  }
   function esc(s){ return String(s==null?"":s).replace(/[&<>]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; }); }
   function escAttr(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
   function fmtDate(dateStr){
@@ -1174,6 +1270,19 @@
     html += '<div class="save-flash" id="saveFlash"></div>';
     html += '</div>';
 
+    // ----- steps -----
+    var savedSteps = (day.steps != null) ? day.steps : "";
+    var stepPct = day.steps ? clamp(day.steps/STEP_GOAL*100, 0, 100) : 0;
+    html += '<div class="card">';
+    html += '<div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline;"><span>Steps</span><span class="card-sub" style="margin:0;">'+(day.steps?Math.round(day.steps).toLocaleString():'0')+' / '+STEP_GOAL.toLocaleString()+'</span></div>';
+    html += '<div class="plan-track" style="margin:.6rem 0 .8rem;"><span class="plan-fill" style="width:'+stepPct+'%;background:var(--accent);"></span></div>';
+    html += '<div class="weight-row">';
+    html += '<input class="weight-input" id="stepsInput" type="number" inputmode="numeric" step="1" placeholder="Steps today" value="'+escAttr(savedSteps)+'">';
+    html += '<button class="save-btn" id="saveStepsBtn">Save</button>';
+    html += '</div>';
+    html += '<div class="save-flash" id="stepsFlash"></div>';
+    html += '</div>';
+
     // ----- plan adherence -----
     var adh = dayAdherence(day, state.meals.length);
     var acls = adherenceClass(adh.pct);
@@ -1224,6 +1333,12 @@
       var flash = document.getElementById("saveFlash");
       flash.textContent = "Saved to log";
       setTimeout(function(){ if(flash) flash.textContent = ""; }, 1800);
+    });
+    document.getElementById("saveStepsBtn").addEventListener("click", function(){
+      var v = parseInt(document.getElementById("stepsInput").value, 10);
+      if(isNaN(v) || v < 0) return;
+      setSteps(ds, v);
+      renderToday();
     });
   }
 
@@ -2075,9 +2190,10 @@
 
     var html = '';
     html += '<div class="page-title">Log</div>';
-    html += '<div class="page-sub">Bodyweight &amp; plan adherence</div>';
+    html += '<div class="page-sub">Bodyweight, steps &amp; plan adherence</div>';
 
     html += buildAdherenceHtml();
+    html += buildInsightHtml();
 
     html += '<div class="section-title">Bodyweight</div>';
     if(sorted.length === 0){
@@ -2116,10 +2232,137 @@
       html += '</tbody></table></div>';
     }
 
+    html += buildHealthSyncHtml();
     html += buildBackupHtml();
 
     document.getElementById("content").innerHTML = html;
+    bindHealthSyncEvents();
     bindBackupEvents();
+  }
+
+  /* ===================== STEPS × WEIGHT INSIGHT ===================== */
+
+  function weeklyStepWeight(){
+    var stepsByWeek = {};
+    Object.keys(state.daily).forEach(function(date){
+      var d = state.daily[date];
+      if(typeof d.steps === "number"){
+        var wk = weekIndexOf(date, state.blockStart);
+        (stepsByWeek[wk] = stepsByWeek[wk] || []).push(d.steps);
+      }
+    });
+    var lastWeightByWeek = {};
+    state.weights.slice().sort(function(a,b){ return a.date<b.date?-1:(a.date>b.date?1:0); }).forEach(function(w){
+      lastWeightByWeek[weekIndexOf(w.date, state.blockStart)] = w.weight;
+    });
+    var weeks = Object.keys(stepsByWeek).map(Number).sort(function(a,b){ return a-b; });
+    return weeks.map(function(wk){
+      var curW = lastWeightByWeek[wk], prevW = null;
+      for(var p=wk-1;p>=1;p--){ if(lastWeightByWeek[p]!=null){ prevW = lastWeightByWeek[p]; break; } }
+      return {
+        week: wk,
+        avgSteps: Math.round(mean(stepsByWeek[wk])),
+        weightChange: (curW!=null && prevW!=null) ? round1(curW-prevW) : null,
+        days: stepsByWeek[wk].length
+      };
+    });
+  }
+
+  function last7Steps(){
+    var out = [];
+    var base = new Date(todayStr()+"T00:00:00");
+    for(var i=0;i<7;i++){
+      var d = new Date(base); d.setDate(d.getDate()-i);
+      var rec = state.daily[d.toISOString().slice(0,10)];
+      if(rec && typeof rec.steps === "number") out.push(rec.steps);
+    }
+    return out;
+  }
+
+  function buildInsightHtml(){
+    var pts = weeklyStepWeight();
+    var l7 = last7Steps();
+    var html = '<div class="section-title">Steps vs Weight</div>';
+    if(!pts.length && !l7.length){
+      html += '<div class="card"><div class="empty-hint">Once your steps sync from Apple Health (or you log them on the Today tab), the app will correlate them with your weight and tell you what\'s working.</div></div>';
+      return html;
+    }
+
+    html += '<div class="card analysis-card">';
+    var withChange = pts.filter(function(p){ return p.weightChange != null; });
+    if(withChange.length >= 3){
+      var r = pearson(withChange.map(function(p){ return p.avgSteps; }), withChange.map(function(p){ return p.weightChange; }));
+      var verdict, vClass, detail;
+      if(r <= -0.35){ verdict = "Steps are working"; vClass = "trend-up"; detail = "Your higher-step weeks line up with the scale trending down — keep the volume up."; }
+      else if(r >= 0.35){ verdict = "Mind the intake"; vClass = "trend-down"; detail = "Higher-step weeks line up with the scale going up, so activity isn't outpacing calories."; }
+      else { verdict = "No clear link yet"; vClass = "trend-flat"; detail = "Your weekly steps and weight changes aren't moving together in an obvious way."; }
+      html += '<div class="analysis-verdict '+vClass+'">'+verdict+'</div>';
+      html += '<div class="analysis-verdict-sub">'+detail+' <span style="color:var(--text-faint)">(r = '+round1(r)+', '+withChange.length+' weeks)</span></div>';
+    } else {
+      html += '<div class="analysis-verdict-sub">Log steps and weigh-ins across at least 3 weeks and the app will correlate them here. So far: '+pts.length+' week'+(pts.length===1?'':'s')+' with step data.</div>';
+    }
+    if(l7.length){
+      var avg = Math.round(mean(l7));
+      var hit = l7.filter(function(s){ return s>=STEP_GOAL; }).length;
+      html += '<div class="analysis-row"><span class="analysis-label">7-day avg steps</span><span class="analysis-val">'+avg.toLocaleString()+'</span></div>';
+      html += '<div class="analysis-row"><span class="analysis-label">Days hit '+STEP_GOAL.toLocaleString()+'</span><span class="analysis-val">'+hit+' / '+l7.length+'</span></div>';
+    }
+    html += '</div>';
+
+    if(pts.length){
+      html += '<div class="card"><div class="adh-list">';
+      pts.slice().reverse().forEach(function(p){
+        var chg = p.weightChange==null ? '—' : (p.weightChange>0?'+':'')+round1(p.weightChange)+' lb';
+        var chgCls = p.weightChange==null ? '' : (p.weightChange<0?'trend-up':(p.weightChange>0?'trend-down':''));
+        html += '<div class="insight-row">'+
+          '<span class="insight-wk">Wk '+p.week+'</span>'+
+          '<span class="insight-steps">'+p.avgSteps.toLocaleString()+' steps/day</span>'+
+          '<span class="insight-chg '+chgCls+'-text">'+chg+'</span>'+
+          '</div>';
+      });
+      html += '</div></div>';
+    }
+    return html;
+  }
+
+  function buildHealthSyncHtml(){
+    var appUrl = location.origin + location.pathname;
+    var html = '<div class="section-title">Apple Health Sync</div>';
+    html += '<div class="card">';
+    html += '<div class="card-sub" style="line-height:1.5;margin-bottom:.8rem;">Apple doesn\'t let websites read Health directly, so a quick <b>Shortcut</b> bridges it — it reads your steps &amp; weight (including Apple Watch) and hands them to this app. Set it up once, then run it each morning.</div>';
+    html += '<ol class="sync-steps">';
+    html += '<li>In the <b>Shortcuts</b> app, make a new shortcut.</li>';
+    html += '<li>Add <b>Find Health Samples</b> for <b>Steps</b> (today), and again for <b>Weight</b> (most recent).</li>';
+    html += '<li>Add a <b>Text</b> action: <code>D:[Current Date, ISO];S:[Steps];W:[Weight]</code></li>';
+    html += '<li>Add <b>Open URLs</b> with: <code>'+esc(appUrl)+'#health=[Text]</code></li>';
+    html += '<li>Under Automation, run it daily — it opens the app and imports automatically.</li>';
+    html += '</ol>';
+    html += '<div class="card-sub" style="margin:.9rem 0 .5rem;">Or paste a health code to import now:</div>';
+    html += '<textarea class="backup-textarea" id="healthPaste" placeholder="D:2026-07-18;S:8231;W:199.5"></textarea>';
+    html += '<button class="backup-btn primary" id="healthImportBtn">Import</button>';
+    html += '<div class="backup-flash" id="healthFlash"></div>';
+    html += '</div>';
+    return html;
+  }
+
+  function bindHealthSyncEvents(){
+    var btn = document.getElementById("healthImportBtn");
+    if(btn) btn.addEventListener("click", function(){
+      var ta = document.getElementById("healthPaste");
+      var txt = ta ? ta.value.trim() : "";
+      var payload = txt.replace(/^[\s\S]*#health=/, ""); // tolerate a full pasted URL
+      var n = importHealthString(payload);
+      if(n){
+        renderLog(); // rebuilds the section with the new data
+        showToast("Imported " + n + " day" + (n===1?"":"s") + " from Health");
+      } else {
+        var f = document.getElementById("healthFlash");
+        if(f){
+          f.textContent = "Nothing imported — check the format (D:date;S:steps;W:weight).";
+          setTimeout(function(){ if(f) f.textContent = ""; }, 3500);
+        }
+      }
+    });
   }
 
   /* ===================== BACKUP & RESTORE ===================== */
@@ -2406,10 +2649,21 @@
     switchTab("today");
   }
 
+  // The Shortcut may open the app fresh (script re-runs, handled below) or,
+  // if it's already open, just change the hash — catch that too.
+  window.addEventListener("hashchange", function(){
+    if(!state) return;
+    var n = ingestHealthHash();
+    if(n){ switchTab("log"); showToast("Synced " + n + " day" + (n===1?"":"s") + " from Apple Health"); }
+  });
+
   if(state){
+    var imported = ingestHealthHash();
     var startTab = localStorage.getItem(LAST_TAB_KEY);
     if(TAB_ORDER.indexOf(startTab) === -1) startTab = "today";
+    if(imported) startTab = "log"; // land on the tab that shows the synced data
     switchTab(startTab);
+    if(imported) showToast("Synced " + imported + " day" + (imported===1?"":"s") + " from Apple Health");
   } else {
     renderWelcome();
   }
