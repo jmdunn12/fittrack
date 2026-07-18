@@ -287,6 +287,12 @@
   }
   .save-btn:active{opacity:.8;}
   .save-flash{color:var(--accent);font-size:.78rem;font-weight:700;margin-top:.5rem;height:1rem;}
+  .step-goal-row{display:flex;align-items:center;gap:.4rem;margin-top:.7rem;color:var(--text-dim);font-size:.78rem;font-weight:600;}
+  .step-goal-input{
+    width:5rem;background:#0D0F17;border:1px solid var(--border);color:var(--text);
+    font-family:inherit;font-size:.82rem;font-weight:700;padding:.35rem .5rem;border-radius:8px;text-align:center;
+  }
+  .step-goal-input:focus{outline:none;border-color:var(--accent);}
 
   /* ---- Diet tab ---- */
   .target-strip{display:flex;gap:.5rem;margin-bottom:1rem;}
@@ -982,6 +988,7 @@
     if(!s.notes) s.notes = clone(DEFAULT_NOTES);
     if(!s.exerciseLog) s.exerciseLog = {};
     if(!s.weekLog) s.weekLog = {};
+    if(s.stepGoal == null) s.stepGoal = 10000;
     // Lifting is tracked by week-of-block. Anchor the block to the earliest
     // logged session, or today for a fresh start.
     if(!s.blockStart){
@@ -1031,7 +1038,7 @@
 
   function exampleState(){
     return {
-      daily:{}, exerciseLog:{}, weekLog:{}, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
       meals: clone(DEFAULT_MEALS),
       training: clone(DEFAULT_TRAINING),
@@ -1047,7 +1054,7 @@
       training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
     }
     return {
-      daily:{}, exerciseLog:{}, weekLog:{}, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: [],
       meals: meals,
       training: training,
@@ -1071,18 +1078,24 @@
   }
 
   // Adherence: how much of the day's plan was completed.
-  // Plan = every meal + a lift (unless it's a rest day) + cardio.
+  // Plan = every meal + a lift (unless rest day) + cardio + hitting the step goal.
+  // Steps give partial credit toward their slot (e.g. 8k of a 10k goal = 0.8).
   function dayAdherence(day, mCount){
     if(mCount == null) mCount = day.meals ? day.meals.length : 0;
     var mealsChecked = 0;
     for(var i=0;i<mCount;i++){ if(day.meals && day.meals[i]) mealsChecked++; }
     var liftPlanned = !day.restDay;
-    var planned = mCount + (liftPlanned?1:0) + 1;
-    var checked = mealsChecked + (liftPlanned && day.lifted?1:0) + (day.cardio?1:0);
+    var goal = stepGoal();
+    var stepsPlanned = goal > 0;
+    var steps = (typeof day.steps === "number") ? day.steps : 0;
+    var stepFrac = stepsPlanned ? clamp(steps/goal, 0, 1) : 0;
+    var planned = mCount + (liftPlanned?1:0) + 1 + (stepsPlanned?1:0);
+    var checked = mealsChecked + (liftPlanned && day.lifted?1:0) + (day.cardio?1:0) + stepFrac;
     return {
       pct: planned>0 ? Math.round(checked/planned*100) : 0,
       mealsChecked: mealsChecked, mCount: mCount,
-      planned: planned, checked: checked, liftPlanned: liftPlanned
+      planned: planned, checked: checked, liftPlanned: liftPlanned,
+      stepsPlanned: stepsPlanned, steps: steps, goal: goal, stepsMet: stepsPlanned && steps >= goal
     };
   }
 
@@ -1100,7 +1113,12 @@
     saveState();
   }
 
-  var STEP_GOAL = 10000;
+  function stepGoal(){ return (state && state.stepGoal != null) ? state.stepGoal : 10000; }
+  function fmtK(n){
+    n = Math.round(n);
+    if(n >= 1000) return (Math.round(n/100)/10) + "k";
+    return String(n);
+  }
 
   function setSteps(dateStr, steps){
     var d = getDay(dateStr);
@@ -1271,15 +1289,17 @@
     html += '</div>';
 
     // ----- steps -----
+    var goal = stepGoal();
     var savedSteps = (day.steps != null) ? day.steps : "";
-    var stepPct = day.steps ? clamp(day.steps/STEP_GOAL*100, 0, 100) : 0;
+    var stepPct = (day.steps && goal>0) ? clamp(day.steps/goal*100, 0, 100) : 0;
     html += '<div class="card">';
-    html += '<div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline;"><span>Steps</span><span class="card-sub" style="margin:0;">'+(day.steps?Math.round(day.steps).toLocaleString():'0')+' / '+STEP_GOAL.toLocaleString()+'</span></div>';
+    html += '<div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline;"><span>Steps</span><span class="card-sub" style="margin:0;">'+(day.steps?Math.round(day.steps).toLocaleString():'0')+' / '+goal.toLocaleString()+'</span></div>';
     html += '<div class="plan-track" style="margin:.6rem 0 .8rem;"><span class="plan-fill" style="width:'+stepPct+'%;background:var(--accent);"></span></div>';
     html += '<div class="weight-row">';
     html += '<input class="weight-input" id="stepsInput" type="number" inputmode="numeric" step="1" placeholder="Steps today" value="'+escAttr(savedSteps)+'">';
     html += '<button class="save-btn" id="saveStepsBtn">Save</button>';
     html += '</div>';
+    html += '<div class="step-goal-row">Daily goal <input class="step-goal-input" id="stepGoalInput" type="number" inputmode="numeric" step="500" value="'+escAttr(goal)+'"> steps</div>';
     html += '<div class="save-flash" id="stepsFlash"></div>';
     html += '</div>';
 
@@ -1294,6 +1314,7 @@
     if(adh.liftPlanned) html += '<span class="plan-chip'+(day.lifted?' done':'')+'">Lift '+(day.lifted?'&#10003;':'&#8212;')+'</span>';
     else html += '<span class="plan-chip rest">Rest day</span>';
     html += '<span class="plan-chip'+(day.cardio?' done':'')+'">Cardio '+(day.cardio?'&#10003;':'&#8212;')+'</span>';
+    if(adh.stepsPlanned) html += '<span class="plan-chip'+(adh.stepsMet?' done':'')+'">Steps '+fmtK(adh.steps)+'/'+fmtK(adh.goal)+'</span>';
     html += '</div>';
     html += '</div>';
 
@@ -1338,6 +1359,13 @@
       var v = parseInt(document.getElementById("stepsInput").value, 10);
       if(isNaN(v) || v < 0) return;
       setSteps(ds, v);
+      renderToday();
+    });
+    document.getElementById("stepGoalInput").addEventListener("change", function(){
+      var v = parseInt(this.value, 10);
+      if(isNaN(v) || v < 0) v = 0;
+      state.stepGoal = v;
+      saveState();
       renderToday();
     });
   }
@@ -2172,7 +2200,8 @@
       var isToday = d.date === ds;
       var breakdown = 'Meals '+d.adh.mealsChecked+'/'+d.adh.mCount +
         (d.day.restDay ? ' · Rest' : (d.day.lifted ? ' · Lift' : '')) +
-        (d.day.cardio ? ' · Cardio' : '');
+        (d.day.cardio ? ' · Cardio' : '') +
+        (d.adh.steps>0 ? ' · '+fmtK(d.adh.steps)+' steps' : '');
       html += '<div class="adh-row">';
       html += '<div class="adh-date">'+fmtDate(d.date)+(isToday?' <span class="adh-today">Today</span>':'')+'</div>';
       html += '<div class="adh-bar-wrap"><span class="adh-bar '+adherenceClass(d.adh.pct)+'" style="width:'+d.adh.pct+'%"></span></div>';
@@ -2302,10 +2331,11 @@
       html += '<div class="analysis-verdict-sub">Log steps and weigh-ins across at least 3 weeks and the app will correlate them here. So far: '+pts.length+' week'+(pts.length===1?'':'s')+' with step data.</div>';
     }
     if(l7.length){
+      var g = stepGoal();
       var avg = Math.round(mean(l7));
-      var hit = l7.filter(function(s){ return s>=STEP_GOAL; }).length;
+      var hit = l7.filter(function(s){ return s>=g; }).length;
       html += '<div class="analysis-row"><span class="analysis-label">7-day avg steps</span><span class="analysis-val">'+avg.toLocaleString()+'</span></div>';
-      html += '<div class="analysis-row"><span class="analysis-label">Days hit '+STEP_GOAL.toLocaleString()+'</span><span class="analysis-val">'+hit+' / '+l7.length+'</span></div>';
+      html += '<div class="analysis-row"><span class="analysis-label">Days hit '+g.toLocaleString()+'</span><span class="analysis-val">'+hit+' / '+l7.length+'</span></div>';
     }
     html += '</div>';
 
