@@ -149,7 +149,7 @@
   .macro-chip.f{color:var(--fat);background:#FFD16622;}
 
   /* ---- Toggle buttons ---- */
-  .toggle-row{display:flex;gap:.6rem;margin-bottom:.75rem;}
+  .toggle-row{display:flex;gap:.6rem;margin-bottom:.6rem;}
   .toggle-btn{
     flex:1;
     background:var(--card);
@@ -164,6 +164,52 @@
   }
   .toggle-btn svg{width:18px;height:18px;}
   .toggle-btn.on{background:var(--accent);border-color:var(--accent);color:#062019;}
+  .toggle-btn.disabled{opacity:.4;}
+  .restday-btn{
+    width:100%;background:none;border:1px solid var(--border);color:var(--text-dim);
+    font-family:inherit;font-weight:700;font-size:.78rem;padding:.55rem;border-radius:var(--radius);
+    margin-bottom:.75rem;
+  }
+  .restday-btn.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim);}
+
+  /* ---- Plan adherence card ---- */
+  .plan-card{margin-top:.15rem;}
+  .plan-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.6rem;}
+  .plan-label{font-weight:700;font-size:.95rem;}
+  .plan-pct{font-weight:800;font-size:1.5rem;letter-spacing:-0.02em;}
+  .plan-track{height:9px;border-radius:6px;background:#1D2030;overflow:hidden;margin-bottom:.7rem;}
+  .plan-fill{display:block;height:100%;border-radius:6px;transition:width .35s ease;}
+  .plan-breakdown{display:flex;gap:.4rem;flex-wrap:wrap;}
+  .plan-chip{font-size:.7rem;font-weight:700;padding:.25rem .5rem;border-radius:7px;background:#1D2030;color:var(--text-dim);}
+  .plan-chip.done{color:var(--accent);background:var(--accent-dim);}
+  .plan-chip.rest{color:var(--carbs);background:#4D9FFF22;}
+  .plan-card.adh-high .plan-pct{color:var(--accent);}
+  .plan-card.adh-high .plan-fill{background:var(--accent);}
+  .plan-card.adh-mid .plan-pct{color:var(--fat);}
+  .plan-card.adh-mid .plan-fill{background:var(--fat);}
+  .plan-card.adh-low .plan-pct{color:var(--protein);}
+  .plan-card.adh-low .plan-fill{background:var(--protein);}
+
+  /* ---- Adherence history (Log) ---- */
+  .adh-high{background:var(--accent);}
+  .adh-mid{background:var(--fat);}
+  .adh-low{background:var(--protein);}
+  .adh-high-text{color:var(--accent);}
+  .adh-mid-text{color:var(--fat);}
+  .adh-low-text{color:var(--protein);}
+  .adh-list{display:flex;flex-direction:column;gap:.65rem;}
+  .adh-row{
+    display:grid;
+    grid-template-columns:3.4rem 1fr 2.6rem;
+    grid-template-areas:"date bar pct" "detail detail detail";
+    align-items:center;gap:.3rem .6rem;
+  }
+  .adh-date{grid-area:date;font-size:.76rem;color:var(--text);font-weight:600;}
+  .adh-today{color:var(--accent);font-weight:700;font-size:.6rem;display:block;}
+  .adh-bar-wrap{grid-area:bar;height:8px;border-radius:5px;background:#1D2030;overflow:hidden;}
+  .adh-bar{display:block;height:100%;border-radius:5px;}
+  .adh-pct{grid-area:pct;text-align:right;font-weight:800;font-size:.85rem;font-variant-numeric:tabular-nums;}
+  .adh-detail{grid-area:detail;font-size:.68rem;color:var(--text-faint);}
 
   /* ---- Weight input ---- */
   .weight-row{display:flex;gap:.6rem;align-items:stretch;}
@@ -916,9 +962,33 @@
 
   function getDay(dateStr){
     if(!state.daily[dateStr]){
-      state.daily[dateStr] = { meals:[false,false,false,false,false,false], lifted:false, cardio:false };
+      state.daily[dateStr] = { meals: state.meals.map(function(){ return false; }), lifted:false, cardio:false, restDay:false };
     }
-    return state.daily[dateStr];
+    var d = state.daily[dateStr];
+    if(!d.meals) d.meals = [];
+    // keep the checkbox array sized to the current meal count for today
+    while(d.meals.length < state.meals.length) d.meals.push(false);
+    return d;
+  }
+
+  // Adherence: how much of the day's plan was completed.
+  // Plan = every meal + a lift (unless it's a rest day) + cardio.
+  function dayAdherence(day, mCount){
+    if(mCount == null) mCount = day.meals ? day.meals.length : 0;
+    var mealsChecked = 0;
+    for(var i=0;i<mCount;i++){ if(day.meals && day.meals[i]) mealsChecked++; }
+    var liftPlanned = !day.restDay;
+    var planned = mCount + (liftPlanned?1:0) + 1;
+    var checked = mealsChecked + (liftPlanned && day.lifted?1:0) + (day.cardio?1:0);
+    return {
+      pct: planned>0 ? Math.round(checked/planned*100) : 0,
+      mealsChecked: mealsChecked, mCount: mCount,
+      planned: planned, checked: checked, liftPlanned: liftPlanned
+    };
+  }
+
+  function adherenceClass(pct){
+    return pct>=90 ? "adh-high" : (pct>=70 ? "adh-mid" : "adh-low");
   }
 
   function setWeight(dateStr, weight){
@@ -997,13 +1067,14 @@
     html += '</div></div>';
 
     html += '<div class="toggle-row">';
-    html += '<button class="toggle-btn'+(day.lifted?' on':'')+'" data-act="lifted">'+
+    html += '<button class="toggle-btn'+(day.lifted&&!day.restDay?' on':'')+(day.restDay?' disabled':'')+'" data-act="lifted">'+
       '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="1" y="9.5" width="3.5" height="5" rx="1"/><rect x="19.5" y="9.5" width="3.5" height="5" rx="1"/><rect x="5.5" y="8" width="2.8" height="8" rx="1"/><rect x="15.7" y="8" width="2.8" height="8" rx="1"/><rect x="8.3" y="11" width="7.4" height="2" rx="0.5"/></svg>'+
       'Lifted</button>';
     html += '<button class="toggle-btn'+(day.cardio?' on':'')+'" data-act="cardio">'+
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>'+
       'Cardio</button>';
     html += '</div>';
+    html += '<button class="restday-btn'+(day.restDay?' on':'')+'" data-act="restDay">'+(day.restDay?'&#10003; Rest day (lifting not counted)':'Mark as rest day')+'</button>';
 
     state.meals.forEach(function(m, i){
       var checked = day.meals[i];
@@ -1030,6 +1101,20 @@
     html += '<div class="save-flash" id="saveFlash"></div>';
     html += '</div>';
 
+    // ----- plan adherence -----
+    var adh = dayAdherence(day, state.meals.length);
+    var acls = adherenceClass(adh.pct);
+    html += '<div class="card plan-card '+acls+'">';
+    html += '<div class="plan-head"><span class="plan-label">Plan followed today</span><span class="plan-pct">'+adh.pct+'%</span></div>';
+    html += '<div class="plan-track"><span class="plan-fill" style="width:'+adh.pct+'%"></span></div>';
+    html += '<div class="plan-breakdown">';
+    html += '<span class="plan-chip">Meals '+adh.mealsChecked+'/'+state.meals.length+'</span>';
+    if(adh.liftPlanned) html += '<span class="plan-chip'+(day.lifted?' done':'')+'">Lift '+(day.lifted?'&#10003;':'&#8212;')+'</span>';
+    else html += '<span class="plan-chip rest">Rest day</span>';
+    html += '<span class="plan-chip'+(day.cardio?' done':'')+'">Cardio '+(day.cardio?'&#10003;':'&#8212;')+'</span>';
+    html += '</div>';
+    html += '</div>';
+
     document.getElementById("content").innerHTML = html;
 
     document.querySelectorAll(".meal-item").forEach(function(el){
@@ -1043,11 +1128,21 @@
     document.querySelectorAll(".toggle-btn").forEach(function(el){
       el.addEventListener("click", function(){
         var act = el.getAttribute("data-act");
+        if(act === "lifted" && day.restDay) return; // lifting disabled on rest days
         day[act] = !day[act];
         saveState();
         renderToday();
       });
     });
+    var restBtn = document.querySelector('.restday-btn[data-act="restDay"]');
+    if(restBtn){
+      restBtn.addEventListener("click", function(){
+        day.restDay = !day.restDay;
+        if(day.restDay) day.lifted = false;
+        saveState();
+        renderToday();
+      });
+    }
     document.getElementById("saveWeightBtn").addEventListener("click", function(){
       var v = parseFloat(document.getElementById("weightInput").value);
       if(isNaN(v) || v <= 0) return;
@@ -1814,14 +1909,64 @@
     return '<span class="trend-badge trend-flat">&#8212; Steady</span>';
   }
 
+  function adherenceDays(){
+    var out = [];
+    Object.keys(state.daily).forEach(function(date){
+      var day = state.daily[date];
+      var mCount = day.meals ? day.meals.length : 0;
+      var adh = dayAdherence(day, mCount);
+      if(adh.checked > 0) out.push({ date:date, adh:adh, day:day });
+    });
+    out.sort(function(a,b){ return a.date<b.date?1:(a.date>b.date?-1:0); }); // newest first
+    return out;
+  }
+
+  function buildAdherenceHtml(){
+    var days = adherenceDays();
+    var html = '<div class="section-title">Plan Adherence</div>';
+    if(!days.length){
+      html += '<div class="card"><div class="empty-hint">Check off meals, lifts, and cardio on the Today tab and each day\'s adherence will be tracked here.</div></div>';
+      return html;
+    }
+
+    var recent = days.slice(0, 7);
+    var avg7 = Math.round(recent.reduce(function(s,d){ return s+d.adh.pct; },0) / recent.length);
+    var all = Math.round(days.reduce(function(s,d){ return s+d.adh.pct; },0) / days.length);
+
+    html += '<div class="stat-row">';
+    html += '<div class="stat-card"><div class="v '+adherenceClass(avg7)+'-text">'+avg7+'<small>%</small></div><div class="l">Last 7 Days</div></div>';
+    html += '<div class="stat-card"><div class="v '+adherenceClass(all)+'-text">'+all+'<small>%</small></div><div class="l">All-Time Avg</div></div>';
+    html += '</div>';
+
+    var ds = todayStr();
+    html += '<div class="card"><div class="adh-list">';
+    days.forEach(function(d){
+      var isToday = d.date === ds;
+      var breakdown = 'Meals '+d.adh.mealsChecked+'/'+d.adh.mCount +
+        (d.day.restDay ? ' · Rest' : (d.day.lifted ? ' · Lift' : '')) +
+        (d.day.cardio ? ' · Cardio' : '');
+      html += '<div class="adh-row">';
+      html += '<div class="adh-date">'+fmtDate(d.date)+(isToday?' <span class="adh-today">Today</span>':'')+'</div>';
+      html += '<div class="adh-bar-wrap"><span class="adh-bar '+adherenceClass(d.adh.pct)+'" style="width:'+d.adh.pct+'%"></span></div>';
+      html += '<div class="adh-pct '+adherenceClass(d.adh.pct)+'-text">'+d.adh.pct+'%</div>';
+      html += '<div class="adh-detail">'+esc(breakdown)+'</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+    return html;
+  }
+
   function renderLog(){
     var sorted = state.weights.slice().sort(function(a,b){ return a.date < b.date ? -1 : (a.date>b.date?1:0); });
     var ds = todayStr();
 
     var html = '';
     html += '<div class="page-title">Log</div>';
-    html += '<div class="page-sub">Bodyweight history</div>';
+    html += '<div class="page-sub">Bodyweight &amp; plan adherence</div>';
 
+    html += buildAdherenceHtml();
+
+    html += '<div class="section-title">Bodyweight</div>';
     if(sorted.length === 0){
       html += '<div class="card"><div class="empty-hint">No weigh-ins yet. Save one from the Today tab.</div></div>';
     } else {
