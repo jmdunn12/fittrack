@@ -270,7 +270,24 @@
   .lift-head{display:flex;align-items:center;gap:.7rem;}
   .lift-name-wrap{flex:1;min-width:0;}
   .lift-name{font-weight:700;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .lift-sub{color:var(--text-dim);font-size:.7rem;margin-top:.15rem;}
+  .lift-sub{color:var(--text-dim);font-size:.7rem;margin-top:.2rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;}
+  .lift-sub-meta{color:var(--text-dim);}
+  .trend-badge{font-size:.64rem;font-weight:800;padding:.1rem .4rem;border-radius:5px;letter-spacing:.02em;white-space:nowrap;}
+  .trend-badge.trend-up{color:var(--accent);background:#00C89622;}
+  .trend-badge.trend-down{color:var(--fat);background:#FFD16622;}
+  .trend-badge.trend-flat{color:var(--text-dim);background:#2A2E42;}
+
+  .analysis-card{padding:1rem;}
+  .analysis-verdict{font-size:1.35rem;font-weight:800;letter-spacing:-0.02em;margin-top:.5rem;}
+  .analysis-verdict.trend-up{color:var(--accent);}
+  .analysis-verdict.trend-down{color:var(--fat);}
+  .analysis-verdict.trend-flat{color:var(--text);}
+  .analysis-verdict-sub{color:var(--text-dim);font-size:.76rem;margin:.15rem 0 .5rem;}
+  .analysis-row{display:flex;justify-content:space-between;gap:.7rem;align-items:baseline;padding:.5rem 0;border-top:1px solid var(--border);font-size:.83rem;}
+  .analysis-label{color:var(--text-dim);}
+  .analysis-val{font-weight:700;text-align:right;font-variant-numeric:tabular-nums;}
+  .analysis-val.trend-up{color:var(--accent);}
+  .analysis-val.trend-down{color:var(--fat);}
   .lift-spark{flex-shrink:0;display:flex;align-items:center;}
   .lift-latest{flex-shrink:0;font-weight:800;font-size:1.05rem;font-variant-numeric:tabular-nums;min-width:3.2rem;text-align:right;}
   .lift-latest small{font-size:.65rem;color:var(--text-dim);font-weight:600;}
@@ -1733,7 +1750,16 @@
       '</svg>';
   }
 
-  function buildLiftingHtml(){
+  function liftTrend(tops){
+    // recent trend: latest top weight vs up to 3 sessions back
+    if(tops.length < 2) return null;
+    var base = tops[Math.max(0, tops.length-4)];
+    var change = tops[tops.length-1] - base;
+    var dir = change >= 2.5 ? "up" : (change <= -2.5 ? "down" : "flat");
+    return { change: change, dir: dir };
+  }
+
+  function getLiftData(){
     // plan order first, then any logged exercises no longer in the plan
     var names = [];
     state.training.forEach(function(d){
@@ -1744,9 +1770,71 @@
     var lifts = [];
     names.forEach(function(name){
       var entries = (state.exerciseLog[name] || []).filter(function(en){ return topWeight(en.sets) != null; });
-      if(entries.length) lifts.push({ name:name, entries:entries });
+      if(entries.length){
+        var tops = entries.map(function(en){ return topWeight(en.sets); });
+        lifts.push({ name:name, entries:entries, tops:tops, trend: liftTrend(tops) });
+      }
     });
+    return lifts;
+  }
 
+  function trendBadgeHtml(trend){
+    if(!trend) return "";
+    if(trend.dir === "up") return '<span class="trend-badge trend-up">&#9650; Stronger</span>';
+    if(trend.dir === "down") return '<span class="trend-badge trend-down">&#9660; Weaker</span>';
+    return '<span class="trend-badge trend-flat">&#8212; Steady</span>';
+  }
+
+  function buildAnalysisHtml(sortedWeights, lifts){
+    var trendable = lifts.filter(function(l){ return l.trend; });
+    var hasBodyweight = sortedWeights.length >= 2;
+    if(!trendable.length && !hasBodyweight) return "";
+
+    var html = '<div class="card analysis-card">';
+    html += '<div class="card-title">Analysis</div>';
+
+    if(trendable.length){
+      var ups = trendable.filter(function(l){ return l.trend.dir === "up"; }).length;
+      var downs = trendable.filter(function(l){ return l.trend.dir === "down"; }).length;
+      var verdict, vClass;
+      if(ups > downs){ verdict = "Getting stronger"; vClass = "trend-up"; }
+      else if(downs > ups){ verdict = "Getting weaker"; vClass = "trend-down"; }
+      else { verdict = "Maintaining"; vClass = "trend-flat"; }
+      html += '<div class="analysis-verdict '+vClass+'">'+verdict+'</div>';
+      html += '<div class="analysis-verdict-sub">'+ups+' of '+trendable.length+' tracked lifts trending up over recent sessions</div>';
+
+      var avgChange = trendable.reduce(function(s,l){ return s + l.trend.change; }, 0) / trendable.length;
+      var totalSessions = lifts.reduce(function(s,l){ return s + l.entries.length; }, 0);
+      html += '<div class="analysis-row"><span class="analysis-label">Avg recent change per lift</span><span class="analysis-val '+(avgChange>=2.5?"trend-up":(avgChange<=-2.5?"trend-down":""))+'">'+(avgChange>0?"+":"")+round1(avgChange)+' lb</span></div>';
+      html += '<div class="analysis-row"><span class="analysis-label">Lifting sessions logged</span><span class="analysis-val">'+totalSessions+'</span></div>';
+
+      var best = null, worst = null;
+      trendable.forEach(function(l){
+        if(l.trend.change > 0 && (!best || l.trend.change > best.trend.change)) best = l;
+        if(l.trend.change < 0 && (!worst || l.trend.change < worst.trend.change)) worst = l;
+      });
+      if(best) html += '<div class="analysis-row"><span class="analysis-label">Most improved</span><span class="analysis-val trend-up">'+esc(best.name)+' +'+round1(best.trend.change)+'</span></div>';
+      if(worst) html += '<div class="analysis-row"><span class="analysis-label">Needs attention</span><span class="analysis-val trend-down">'+esc(worst.name)+' '+round1(worst.trend.change)+'</span></div>';
+    } else {
+      html += '<div class="analysis-verdict-sub">Log lift weights on the Training tab across a few sessions to get a strength trend.</div>';
+    }
+
+    if(hasBodyweight){
+      var latest = sortedWeights[sortedWeights.length-1];
+      var latestTime = new Date(latest.date).getTime();
+      var windowStart = latestTime - 30*24*3600*1000;
+      var inWindow = sortedWeights.filter(function(w){ return new Date(w.date).getTime() >= windowStart; });
+      var base = inWindow.length >= 2 ? inWindow[0] : sortedWeights[sortedWeights.length-2];
+      var bwDelta = latest.weight - base.weight;
+      var label = inWindow.length >= 2 ? "Bodyweight (last 30 days)" : "Bodyweight (since prior entry)";
+      html += '<div class="analysis-row"><span class="analysis-label">'+label+'</span><span class="analysis-val">'+(bwDelta>0?"+":"")+round1(bwDelta)+' lb</span></div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function buildLiftingHtml(lifts){
     var html = '<div class="section-title">Lifting Progress</div>';
     if(!lifts.length){
       html += '<div class="card"><div class="empty-hint">No lifts logged yet. Enter weights on the Training tab and each exercise\'s progression will show up here.</div></div>';
@@ -1754,20 +1842,20 @@
     }
 
     lifts.forEach(function(l){
-      var tops = l.entries.map(function(en){ return topWeight(en.sets); });
+      var tops = l.tops;
       var latestTop = tops[tops.length-1];
       var firstTop = tops[0];
       var change = latestTop - firstTop;
       var changeHtml = "";
       if(l.entries.length > 1 && change !== 0){
         var cls = change > 0 ? "gain" : "loss";
-        changeHtml = '<span class="lift-change '+cls+'">'+(change>0?"+":"")+round1(change)+'</span>';
+        changeHtml = '<span class="lift-change '+cls+'">'+(change>0?"+":"")+round1(change)+' overall</span>';
       }
       var isOpen = !!openLifts[l.name];
       html += '<div class="card lift-card'+(isOpen?' open':'')+'" data-lift="'+escAttr(l.name)+'">';
       html += '<div class="lift-head">';
       html += '<div class="lift-name-wrap"><div class="lift-name">'+esc(l.name)+'</div>'+
-        '<div class="lift-sub">'+l.entries.length+' session'+(l.entries.length===1?'':'s')+(changeHtml?' &middot; ':'')+changeHtml+'</div></div>';
+        '<div class="lift-sub">'+trendBadgeHtml(l.trend)+'<span class="lift-sub-meta">'+l.entries.length+' session'+(l.entries.length===1?'':'s')+(changeHtml?' &middot; '+changeHtml:'')+'</span></div></div>';
       html += '<div class="lift-spark">'+buildSparkSVG(tops)+'</div>';
       html += '<div class="lift-latest">'+round1(latestTop)+'<small> lb</small></div>';
       html += '</div>';
@@ -1835,7 +1923,9 @@
       html += '</tbody></table></div>';
     }
 
-    html += buildLiftingHtml();
+    var lifts = getLiftData();
+    html += buildAnalysisHtml(sorted, lifts);
+    html += buildLiftingHtml(lifts);
 
     document.getElementById("content").innerHTML = html;
 
