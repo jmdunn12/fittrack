@@ -312,6 +312,13 @@
 
   /* ---- Ingredient rows (Diet) ---- */
   .lookup-hint{color:var(--text-faint);font-size:.68rem;margin-bottom:1rem;line-height:1.4;}
+  .quick-add-row{margin-top:.7rem;}
+  .quick-add-open{margin-top:.7rem;margin-bottom:0;}
+  .quick-add-confirm{
+    background:var(--accent);color:#062019;border:none;font-family:inherit;
+    font-weight:800;font-size:.82rem;padding:.55rem .9rem;border-radius:10px;flex-shrink:0;
+  }
+  .quick-add-confirm:active{opacity:.8;}
   .ing-row{margin-bottom:.6rem;}
   .ing-row-top{display:flex;gap:.5rem;align-items:flex-end;}
   .ing-field{flex:1;min-width:0;}
@@ -916,6 +923,7 @@
   /* ===================== RENDER: DIET ===================== */
 
   var dietEditMode = false;
+  var quickAddMi = null;
   var lookupQueueRunning = false;
 
   function ingStatusText(item){
@@ -1120,6 +1128,18 @@
           '<span class="macro-chip c">C '+Math.round(mt.c)+'g</span>'+
           '<span class="macro-chip f">F '+Math.round(mt.f)+'g</span>'+
           '</div>';
+        if(quickAddMi === mi){
+          html += '<div class="ing-row-top quick-add-row">'+
+            '<div class="ing-field"><label>Food type</label>'+
+            '<input class="field-input" id="quickAddFood" placeholder="e.g. Banana"></div>'+
+            '<div class="ing-field ing-field-grams"><label>Grams</label>'+
+            '<input class="field-input" id="quickAddQty" type="number" inputmode="decimal" value="100"></div>'+
+            '<button class="quick-add-confirm" data-meal-idx="'+mi+'">Add</button>'+
+            '<button class="remove-line-btn" data-act="quick-add-cancel">&times;</button>'+
+            '</div>';
+        } else {
+          html += '<button class="add-line-btn quick-add-open" data-act="quick-add-open" data-meal-idx="'+mi+'">+ Add food</button>';
+        }
       }
       html += '</div>';
     });
@@ -1228,6 +1248,54 @@
           autofocusSelector = '.ing-food[data-meal-idx="'+mi+'"][data-item-idx="'+(state.meals[mi].items.length-1)+'"]';
           renderDiet();
         });
+      });
+    } else {
+      document.querySelectorAll('[data-act="quick-add-open"]').forEach(function(btn){
+        btn.addEventListener("click", function(){
+          quickAddMi = parseInt(btn.getAttribute("data-meal-idx"),10);
+          autofocusSelector = '#quickAddFood';
+          renderDiet();
+        });
+      });
+
+      var qaCancel = document.querySelector('[data-act="quick-add-cancel"]');
+      if(qaCancel){
+        qaCancel.addEventListener("click", function(){
+          quickAddMi = null;
+          renderDiet();
+        });
+      }
+
+      function confirmQuickAdd(mi){
+        var foodEl = document.getElementById("quickAddFood");
+        var qtyEl = document.getElementById("quickAddQty");
+        var food = foodEl ? foodEl.value.trim() : "";
+        var qty = qtyEl ? parseFloat(qtyEl.value) : NaN;
+        if(!food){ if(foodEl) foodEl.focus(); return; }
+        if(isNaN(qty) || qty <= 0) qty = 100;
+        state.meals[mi].items.push(ing(food, qty, "g"));
+        saveState();
+        quickAddMi = null;
+        renderDiet();
+      }
+
+      var qaConfirm = document.querySelector('.quick-add-confirm');
+      if(qaConfirm){
+        qaConfirm.addEventListener("click", function(){
+          confirmQuickAdd(parseInt(qaConfirm.getAttribute("data-meal-idx"),10));
+        });
+      }
+
+      ["quickAddFood","quickAddQty"].forEach(function(id){
+        var el = document.getElementById(id);
+        if(el){
+          el.addEventListener("keydown", function(ev){
+            if(ev.key === "Enter" && quickAddMi != null){
+              ev.preventDefault();
+              confirmQuickAdd(quickAddMi);
+            }
+          });
+        }
       });
     }
 
