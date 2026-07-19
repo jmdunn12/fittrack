@@ -259,6 +259,44 @@
   }
   .toast.show{opacity:1;transform:translate(-50%, 0);}
 
+  /* ---- Instructions sheet ---- */
+  .sheet-overlay{
+    position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;
+    opacity:0;transition:opacity .25s;
+  }
+  .sheet-overlay.show{opacity:1;}
+  .sheet{
+    position:absolute;left:0;right:0;bottom:0;top:calc(2.5rem + var(--safe-t));
+    max-width:480px;margin:0 auto;
+    background:var(--bg);border:1px solid var(--border);
+    border-top-left-radius:20px;border-top-right-radius:20px;
+    display:flex;flex-direction:column;
+    transform:translateY(100%);transition:transform .28s ease;
+  }
+  .sheet-overlay.show .sheet{transform:translateY(0);}
+  .sheet-head{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:1rem;border-bottom:1px solid var(--border);flex-shrink:0;
+  }
+  .sheet-title{font-weight:800;font-size:1rem;}
+  .sheet-close{
+    background:var(--accent);color:#062019;border:none;font-family:inherit;
+    font-weight:800;font-size:.85rem;padding:.5rem 1.1rem;border-radius:10px;flex-shrink:0;
+  }
+  .sheet-body{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:1.1rem 1rem calc(2rem + var(--safe-b));}
+  .help-block{margin-bottom:1.4rem;}
+  .help-block:last-child{margin-bottom:0;}
+  .help-block h3{font-size:1rem;font-weight:800;margin-bottom:.4rem;color:var(--accent);}
+  .help-block p{font-size:.86rem;line-height:1.55;color:var(--text-dim);margin-bottom:.5rem;}
+  .help-block p:last-child{margin-bottom:0;}
+  .help-block ul,.help-block ol{margin:.3rem 0 .5rem;padding-left:1.2rem;}
+  .help-block li{font-size:.86rem;line-height:1.5;color:var(--text-dim);margin-bottom:.4rem;}
+  .help-block b{color:var(--text);font-weight:700;}
+  .help-block code{
+    background:var(--card);border:1px solid var(--border);border-radius:6px;
+    padding:.1rem .35rem;font-size:.76rem;color:var(--accent);word-break:break-all;
+  }
+
   /* ---- Weight input ---- */
   .weight-row{display:flex;gap:.6rem;align-items:stretch;}
   .weight-input{
@@ -2218,7 +2256,9 @@
     var ds = todayStr();
 
     var html = '';
-    html += '<div class="page-title">Log</div>';
+    html += '<div class="page-head-row"><div class="page-title">Log</div>'+
+      '<button class="edit-toggle-btn" id="logHelpBtn">'+
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .8-1 1.7"/><path d="M12 17h.01"/></svg>Help</button></div>';
     html += '<div class="page-sub">Bodyweight, steps &amp; plan adherence</div>';
 
     html += buildAdherenceHtml();
@@ -2267,6 +2307,69 @@
     document.getElementById("content").innerHTML = html;
     bindHealthSyncEvents();
     bindBackupEvents();
+    var helpBtn = document.getElementById("logHelpBtn");
+    if(helpBtn) helpBtn.addEventListener("click", showInstructions);
+  }
+
+  /* ===================== INSTRUCTIONS SHEET ===================== */
+
+  function showInstructions(){
+    var ov = document.createElement("div");
+    ov.className = "sheet-overlay";
+    ov.innerHTML =
+      '<div class="sheet">'+
+        '<div class="sheet-head"><span class="sheet-title">How to use Warrior Fit Tracker</span>'+
+        '<button class="sheet-close" id="sheetClose">Done</button></div>'+
+        '<div class="sheet-body">'+buildInstructionsHtml()+'</div>'+
+      '</div>';
+    document.body.appendChild(ov);
+    requestAnimationFrame(function(){ ov.classList.add("show"); });
+    function close(){ ov.classList.remove("show"); setTimeout(function(){ if(ov.parentNode) ov.parentNode.removeChild(ov); }, 260); }
+    ov.querySelector("#sheetClose").addEventListener("click", close);
+    ov.addEventListener("click", function(e){ if(e.target === ov) close(); });
+  }
+
+  function buildInstructionsHtml(){
+    var appUrl = location.origin + location.pathname;
+    var h = "";
+
+    h += '<div class="help-block"><h3>The basics</h3>'+
+      '<p>Everything you enter is saved <b>only on this device</b> — nothing is uploaded, and no one else can see your data. Because of that, <b>if the app is ever deleted your data is gone</b>, so make a backup (bottom of this Log tab) and keep it somewhere safe.</p></div>';
+
+    h += '<div class="help-block"><h3>Today</h3>'+
+      '<ul>'+
+      '<li>Tap each <b>meal</b> to check it off as you eat it — the calories and macros add up at the top.</li>'+
+      '<li>Tap <b>Lifted</b> and <b>Cardio</b> when you do them. Use <b>Mark as rest day</b> so lifting isn\'t counted on off days.</li>'+
+      '<li>Log your <b>bodyweight</b> and <b>steps</b> for the day. You can change your daily step goal right on the Steps card.</li>'+
+      '<li>The <b>Plan followed today</b> card shows what % of your plan you hit — meals, lift, cardio, and steps combined.</li>'+
+      '</ul></div>';
+
+    h += '<div class="help-block"><h3>Diet</h3>'+
+      '<p>Tap <b>+ Add food</b> on any meal to add an item — type the food and grams, and the macros are looked up automatically. Tap <b>Edit</b> (top right) to rename meals or change ingredients. Totals recalculate as you go.</p></div>';
+
+    h += '<div class="help-block"><h3>Training</h3>'+
+      '<p>Pick your <b>Week</b> from the dropdown at the top — each week is a fresh sheet to fill in. Open a day, then type the <b>weight</b> you used for each set. Last weeks\' numbers show above each exercise so you can beat them. Tap <b>Edit</b> to change the exercises or split.</p></div>';
+
+    h += '<div class="help-block"><h3>Progress</h3>'+
+      '<p>See where each lift <b>started vs. now</b> across your training block, with the app\'s own read on whether you\'re getting stronger. Switch the 4 / 8 / 12-week window at the top.</p></div>';
+
+    h += '<div class="help-block"><h3>Log</h3>'+
+      '<p>Your history lives here: <b>plan adherence</b> day by day, the <b>steps-vs-weight</b> insight, your <b>bodyweight</b> chart, and <b>Backup &amp; Restore</b>.</p></div>';
+
+    h += '<div class="help-block"><h3>Auto-import steps from Apple Health</h3>'+
+      '<p>Apple won\'t let a website read Health directly, so a quick <b>Shortcut</b> does it. Make a new shortcut in the <b>Shortcuts</b> app with these 3 actions:</p>'+
+      '<ol>'+
+      '<li><b>Find Health Samples</b> → Sample Type <b>Steps</b>, add a filter for <b>Start Date is Today</b>.</li>'+
+      '<li><b>Calculate Statistics</b> → Operation <b>Sum</b> (input is the Health Samples from step 1).</li>'+
+      '<li><b>Open URLs</b> → type <code>'+esc(appUrl)+'#health=S:</code> then insert the <b>Calculate Statistics Result</b> as a blue variable right after <code>S:</code>.</li>'+
+      '</ol>'+
+      '<p>Tap ▶︎ to run it (allow Health access the first time). The app opens and imports today\'s steps. To make it automatic: Shortcuts → <b>Automation</b> → new <b>Time of Day</b> automation (an evening time captures a full day) → <b>Run Shortcut</b> → turn off "Ask Before Running".</p>'+
+      '<p>You can also skip the Shortcut and just type a code into the <b>Apple Health Sync</b> box on this tab, like <code>S:8500</code> or <code>D:2026-07-18;S:8500;W:199</code>.</p></div>';
+
+    h += '<div class="help-block"><h3>Moving to a new phone</h3>'+
+      '<p>On the old phone: <b>Copy backup code</b> (or Download file) below. On the new phone: open the app, then paste it into <b>Restore</b>. Done.</p></div>';
+
+    return h;
   }
 
   /* ===================== STEPS × WEIGHT INSIGHT ===================== */
