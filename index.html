@@ -54,6 +54,14 @@
   }
   h1,h2,h3,p{margin:0;}
   .page-title{font-size:1.5rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:.25rem;}
+  .today-select{
+    appearance:none;-webkit-appearance:none;background:transparent;border:none;
+    color:var(--text);font-family:inherit;font-size:1.5rem;font-weight:800;letter-spacing:-0.02em;
+    padding:0 1.7rem 0 0;margin-left:-2px;max-width:100%;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300C896' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 0 center;background-size:20px;
+  }
+  .today-select:focus{outline:none;}
   .page-sub{color:var(--text-dim);font-size:.85rem;margin-bottom:1.1rem;}
 
   /* ---- Tab bar ---- */
@@ -1254,8 +1262,30 @@
 
   /* ===================== RENDER: TODAY ===================== */
 
+  var todayViewDate = null; // which day the Today tab is showing; resets to today on tab entry
+
+  function dateNDaysAgo(n){
+    var d = new Date(todayStr()+"T00:00:00");
+    d.setDate(d.getDate()-n);
+    return d.toISOString().slice(0,10);
+  }
+  function fmtFullDate(dateStr){
+    var parts = dateStr.split("-");
+    var d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    return d.toLocaleDateString(undefined, {weekday:"long", month:"long", day:"numeric"});
+  }
+  function dayOptionLabel(offset, dateStr){
+    if(offset === 0) return "Today";
+    if(offset === 1) return "Yesterday";
+    var parts = dateStr.split("-");
+    var d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    return d.toLocaleDateString(undefined, {weekday:"short", month:"short", day:"numeric"});
+  }
+
   function renderToday(){
-    var ds = todayStr();
+    if(todayViewDate == null) todayViewDate = todayStr();
+    var ds = todayViewDate;
+    var isToday = ds === todayStr();
     var day = getDay(ds);
     var targets = getDailyTotals();
 
@@ -1279,8 +1309,13 @@
     }
 
     var html = '';
-    html += '<div class="page-title">Today</div>';
-    html += '<div class="page-sub">'+ new Date().toLocaleDateString(undefined,{weekday:"long", month:"long", day:"numeric"}) +'</div>';
+    html += '<div class="page-head-row"><select class="today-select" id="todaySelect">';
+    for(var off=0; off<7; off++){
+      var od = dateNDaysAgo(off);
+      html += '<option value="'+od+'"'+(od===ds?' selected':'')+'>'+dayOptionLabel(off, od)+'</option>';
+    }
+    html += '</select></div>';
+    html += '<div class="page-sub">'+ fmtFullDate(ds) + (isToday ? '' : ' &middot; <span style="color:var(--accent);font-weight:700;">back-filling a past day</span>') +'</div>';
 
     html += '<div class="card totals-card">';
     html += '<div class="totals-head"><div class="totals-kcal">'+Math.round(consumed.kcal)+' <span>/ '+Math.round(targets.kcal)+' kcal</span></div></div>';
@@ -1315,7 +1350,9 @@
       html += '</div>';
     });
 
-    var savedWeight = day.weight != null ? day.weight : "";
+    var wEntry = null;
+    for(var wi=0; wi<state.weights.length; wi++){ if(state.weights[wi].date === ds){ wEntry = state.weights[wi]; break; } }
+    var savedWeight = wEntry ? wEntry.weight : (day.weight != null ? day.weight : "");
     html += '<div class="card">';
     html += '<div class="card-title">Bodyweight</div>';
     html += '<div class="card-sub" style="margin-bottom:.7rem;">Log today\'s weigh-in</div>';
@@ -1357,6 +1394,11 @@
     html += '</div>';
 
     document.getElementById("content").innerHTML = html;
+
+    document.getElementById("todaySelect").addEventListener("change", function(){
+      todayViewDate = this.value;
+      renderToday();
+    });
 
     document.querySelectorAll(".meal-item").forEach(function(el){
       el.addEventListener("click", function(){
@@ -2768,6 +2810,7 @@
   function switchTab(name){
     if(!state) return;
     if(!TABS[name]) name = "today";
+    if(name === "today") todayViewDate = todayStr(); // always open on today
     localStorage.setItem(LAST_TAB_KEY, name);
     document.querySelectorAll(".tabbtn").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-tab")===name);
