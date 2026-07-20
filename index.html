@@ -399,6 +399,9 @@
   .chart-card{padding:1rem 1rem .5rem;}
   .chart-wrap{width:100%;}
   .chart-wrap svg{width:100%;height:auto;display:block;}
+  .chart-legend{display:flex;gap:1.1rem;justify-content:center;margin:.3rem 0 .5rem;flex-wrap:wrap;}
+  .chart-legend .lg{display:flex;align-items:center;gap:.35rem;font-size:.7rem;color:var(--text-dim);font-weight:600;}
+  .chart-legend .lg-dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
   table.log-table{width:100%;border-collapse:collapse;font-size:.83rem;}
   table.log-table th{
     text-align:left;color:var(--text-dim);font-size:.68rem;text-transform:uppercase;
@@ -694,13 +697,13 @@
   }
 
   function mealTotals(m){
-    // Sum whole-gram ingredient contributions (the same rounded values the
-    // UI shows per ingredient) so ingredients always add up exactly to the
-    // meal chips, and meals add up exactly to the daily strip.
+    // Sum RAW (unrounded) ingredient contributions so totals stay accurate —
+    // rounding each ingredient before summing compounds into real drift across
+    // a day. Rounding happens only at display time (Math.round on p/c/f/kcal).
     var t = {p:0, c:0, f:0};
     m.items.forEach(function(item){
       var c = ingredientContribution(item);
-      t.p += Math.round(c.p); t.c += Math.round(c.c); t.f += Math.round(c.f);
+      t.p += c.p; t.c += c.c; t.f += c.f;
     });
     t.kcal = t.p*4 + t.c*4 + t.f*9;
     return t;
@@ -914,10 +917,13 @@
       ["Lying Leg Curl","3 x 12-15"],
       ["Standing Calf Raise","3 x 15 + partials"]
     ]},
-    { day:4, title:"Day 4 — Rest", focus:"Recovery", rest:true, ex:[
-      ["Light walking / mobility work","10,000 steps"],
-      ["Optional easy cardio","20-30 min, low intensity"],
-      ["Stretching / foam rolling","10-15 min"]
+    { day:4, title:"Day 4 — Arms", focus:"Biceps / Triceps specialization", rest:false, ex:[
+      ["Close-Grip Bench Press","4 x 8-10"],
+      ["Barbell Curl","4 x 8-10"],
+      ["Skullcrusher","3 x 10-12"],
+      ["Incline DB Curl","3 x 10-12"],
+      ["Cable Triceps Pushdown","2 x 12-15 + rest-pause"],
+      ["Cable Curl","2 x 12-15 + rest-pause / partials"]
     ]},
     { day:5, title:"Day 5 — Push", focus:"Chest / Shoulders / Triceps", rest:false, ex:[
       ["Incline Barbell Press","4 x 6-8"],
@@ -935,13 +941,10 @@
       ["Shrug","3 x 12-15"],
       ["Incline DB Curl","2 x 10-12 + rest-pause"]
     ]},
-    { day:7, title:"Day 7 — Arms", focus:"Biceps / Triceps specialization", rest:false, ex:[
-      ["Close-Grip Bench Press","4 x 8-10"],
-      ["Barbell Curl","4 x 8-10"],
-      ["Skullcrusher","3 x 10-12"],
-      ["Incline DB Curl","3 x 10-12"],
-      ["Cable Triceps Pushdown","2 x 12-15 + rest-pause"],
-      ["Cable Curl","2 x 12-15 + rest-pause / partials"]
+    { day:7, title:"Day 7 — Rest", focus:"Recovery", rest:true, ex:[
+      ["Light walking / mobility work","10,000 steps"],
+      ["Optional easy cardio","20-30 min, low intensity"],
+      ["Stretching / foam rolling","10-15 min"]
     ]}
   ];
 
@@ -1017,24 +1020,18 @@
       s.engineV = 2;
     }
     if(!s.training) s.training = clone(DEFAULT_TRAINING);
-    // split v2: rest day moves from day 7 to day 4, Arms moves to day 7.
-    // Swap the whole day objects so any edited exercises travel with them.
-    if(s.splitV !== 2){
-      var d4 = s.training[3], d7 = s.training[6];
-      if(d4 && d7 && !d4.rest && d7.rest){
-        s.training[3] = d7;
-        s.training[6] = d4;
-        s.training[3].day = 4;
-        s.training[6].day = 7;
-        s.training[3].title = String(s.training[3].title||"").replace(/^Day\s*\d+/, "Day 4");
-        s.training[6].title = String(s.training[6].title||"").replace(/^Day\s*\d+/, "Day 7");
-      }
-      s.splitV = 2;
-    }
+    // NOTE: a saved training block is the user's own data and is never
+    // reordered by a migration — the day layout only comes from
+    // DEFAULT_TRAINING on a fresh install. (An earlier day-4/7 swap migration
+    // was removed so saved/customized blocks stay exactly as the user left
+    // them.)
     if(!s.notes) s.notes = clone(DEFAULT_NOTES);
     if(!s.exerciseLog) s.exerciseLog = {};
     if(!s.weekLog) s.weekLog = {};
     if(s.stepGoal == null) s.stepGoal = 10000;
+    // Persisted daily adherence snapshots (historical fact — never recomputed
+    // from a later plan/goal). Backfilled once from existing daily records.
+    if(!s.snapshots){ s.snapshots = {}; s.snapshotsBackfilled = false; }
     // Lifting is tracked by week-of-block. Anchor the block to the earliest
     // logged session, or today for a fresh start.
     if(!s.blockStart){
@@ -1082,9 +1079,11 @@
     try{ navigator.storage.persist(); }catch(e){}
   }
 
+  if(state) backfillSnapshots();
+
   function exampleState(){
     return {
-      daily:{}, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
       meals: clone(DEFAULT_MEALS),
       training: clone(DEFAULT_TRAINING),
@@ -1100,7 +1099,7 @@
       training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
     }
     return {
-      daily:{}, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: [],
       meals: meals,
       training: training,
@@ -1149,6 +1148,42 @@
     return pct>=90 ? "adh-high" : (pct>=70 ? "adh-mid" : "adh-low");
   }
 
+  // Freeze the day's adherence as a historical snapshot. Called whenever the
+  // day's inputs change. Rest-day rule: on a rest day, training is N/A
+  // (excluded from the score) — only diet, cardio and steps count.
+  function writeSnapshot(dateStr){
+    var day = state.daily[dateStr];
+    if(!day){ if(state.snapshots[dateStr]) delete state.snapshots[dateStr]; return; }
+    var adh = dayAdherence(day, day.meals ? day.meals.length : 0);
+    if(adh.checked <= 0){
+      // nothing logged that day — don't keep an empty snapshot
+      if(state.snapshots[dateStr]) delete state.snapshots[dateStr];
+      return;
+    }
+    state.snapshots[dateStr] = {
+      date: dateStr,
+      dietPct: adh.mCount>0 ? Math.round(adh.mealsChecked/adh.mCount*100) : 0,
+      mealsChecked: adh.mealsChecked,
+      mCount: adh.mCount,
+      trainingDone: day.restDay ? null : !!day.lifted,   // null = rest day (N/A)
+      restDay: !!day.restDay,
+      cardioDone: !!day.cardio,
+      steps: adh.steps,
+      stepGoal: adh.goal,
+      stepsPct: adh.stepsPlanned ? Math.round(clamp(adh.steps/adh.goal,0,1)*100) : null,
+      overallPct: adh.pct
+    };
+  }
+
+  // One-time: turn existing daily records into snapshots for users who logged
+  // before snapshots existed (best-effort using the current goal/plan size).
+  function backfillSnapshots(){
+    if(!state || state.snapshotsBackfilled) return;
+    Object.keys(state.daily).forEach(function(date){ writeSnapshot(date); });
+    state.snapshotsBackfilled = true;
+    saveState();
+  }
+
   function setWeight(dateStr, weight){
     var found = false;
     for(var i=0;i<state.weights.length;i++){
@@ -1169,6 +1204,7 @@
   function setSteps(dateStr, steps){
     var d = getDay(dateStr);
     d.steps = steps;
+    writeSnapshot(dateStr);
     saveState();
   }
 
@@ -1245,6 +1281,11 @@
     var parts = dateStr.split("-");
     var d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
     return d.toLocaleDateString(undefined, {month:"short", day:"numeric"});
+  }
+  function shiftISO(dateStr, delta){
+    var d = new Date(dateStr+"T00:00:00");
+    d.setDate(d.getDate()+delta);
+    return d.toISOString().slice(0,10);
   }
 
   var autofocusSelector = null;
@@ -1404,6 +1445,7 @@
       el.addEventListener("click", function(){
         var idx = parseInt(el.getAttribute("data-meal"),10);
         day.meals[idx] = !day.meals[idx];
+        writeSnapshot(ds);
         saveState();
         renderToday();
       });
@@ -1413,6 +1455,7 @@
         var act = el.getAttribute("data-act");
         if(act === "lifted" && day.restDay) return; // lifting disabled on rest days
         day[act] = !day[act];
+        writeSnapshot(ds);
         saveState();
         renderToday();
       });
@@ -1422,6 +1465,7 @@
       restBtn.addEventListener("click", function(){
         day.restDay = !day.restDay;
         if(day.restDay) day.lifted = false;
+        writeSnapshot(ds);
         saveState();
         renderToday();
       });
@@ -2245,13 +2289,11 @@
     return '<span class="trend-badge trend-flat">&#8212; Steady</span>';
   }
 
+  // Reads the frozen snapshots (historical fact), newest first.
   function adherenceDays(){
     var out = [];
-    Object.keys(state.daily).forEach(function(date){
-      var day = state.daily[date];
-      var mCount = day.meals ? day.meals.length : 0;
-      var adh = dayAdherence(day, mCount);
-      if(adh.checked > 0) out.push({ date:date, adh:adh, day:day });
+    Object.keys(state.snapshots).forEach(function(date){
+      out.push({ date:date, snap:state.snapshots[date] });
     });
     out.sort(function(a,b){ return a.date<b.date?1:(a.date>b.date?-1:0); }); // newest first
     return out;
@@ -2266,8 +2308,8 @@
     }
 
     var recent = days.slice(0, 7);
-    var avg7 = Math.round(recent.reduce(function(s,d){ return s+d.adh.pct; },0) / recent.length);
-    var all = Math.round(days.reduce(function(s,d){ return s+d.adh.pct; },0) / days.length);
+    var avg7 = Math.round(recent.reduce(function(s,d){ return s+d.snap.overallPct; },0) / recent.length);
+    var all = Math.round(days.reduce(function(s,d){ return s+d.snap.overallPct; },0) / days.length);
 
     html += '<div class="stat-row">';
     html += '<div class="stat-card"><div class="v '+adherenceClass(avg7)+'-text">'+avg7+'<small>%</small></div><div class="l">Last 7 Days</div></div>';
@@ -2277,15 +2319,16 @@
     var ds = todayStr();
     html += '<div class="card"><div class="adh-list">';
     days.forEach(function(d){
+      var snap = d.snap;
       var isToday = d.date === ds;
-      var breakdown = 'Meals '+d.adh.mealsChecked+'/'+d.adh.mCount +
-        (d.day.restDay ? ' · Rest' : (d.day.lifted ? ' · Lift' : '')) +
-        (d.day.cardio ? ' · Cardio' : '') +
-        (d.adh.steps>0 ? ' · '+fmtK(d.adh.steps)+' steps' : '');
+      var breakdown = 'Meals '+snap.mealsChecked+'/'+snap.mCount +
+        (snap.restDay ? ' · Rest' : (snap.trainingDone ? ' · Lift' : '')) +
+        (snap.cardioDone ? ' · Cardio' : '') +
+        (snap.steps>0 ? ' · '+fmtK(snap.steps)+' steps' : '');
       html += '<div class="adh-row">';
       html += '<div class="adh-date">'+fmtDate(d.date)+(isToday?' <span class="adh-today">Today</span>':'')+'</div>';
-      html += '<div class="adh-bar-wrap"><span class="adh-bar '+adherenceClass(d.adh.pct)+'" style="width:'+d.adh.pct+'%"></span></div>';
-      html += '<div class="adh-pct '+adherenceClass(d.adh.pct)+'-text">'+d.adh.pct+'%</div>';
+      html += '<div class="adh-bar-wrap"><span class="adh-bar '+adherenceClass(snap.overallPct)+'" style="width:'+snap.overallPct+'%"></span></div>';
+      html += '<div class="adh-pct '+adherenceClass(snap.overallPct)+'-text">'+snap.overallPct+'%</div>';
       html += '<div class="adh-detail">'+esc(breakdown)+'</div>';
       html += '</div>';
     });
@@ -2697,10 +2740,124 @@
     return out;
   }
 
+  // Dual-axis chart: weight 7-day avg (left, accent) + adherence 7-day avg
+  // (right 0-100, carbs blue). Gaps in either series break the line cleanly.
+  function buildDualChartSVG(dates, wRoll, aRoll){
+    var W=320, H=160, padL=30, padR=30, padT=14, padB=22;
+    var innerW = W-padL-padR, innerH = H-padT-padB;
+    var n = dates.length;
+    function x(i){ return n<=1 ? padL+innerW/2 : padL + innerW*i/(n-1); }
+
+    var wv = wRoll.filter(function(v){ return v!=null; });
+    var wmin=0, wmax=1;
+    if(wv.length){
+      wmin = Math.min.apply(null,wv); wmax = Math.max.apply(null,wv);
+      if(wmin===wmax){ wmin-=1; wmax+=1; }
+      var wp = (wmax-wmin)*0.15; wmin-=wp; wmax+=wp;
+    }
+    function yW(v){ return padT + innerH*(1-(v-wmin)/(wmax-wmin)); }
+    function yA(v){ return padT + innerH*(1-clamp(v,0,100)/100); }
+
+    var svg = '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">';
+    for(var g=0; g<=2; g++){
+      var gy = padT + innerH*g/2;
+      svg += '<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+gy+'" y2="'+gy+'" stroke="#222536" stroke-width="1"/>';
+      svg += '<text x="'+(W-padR+3)+'" y="'+(gy+3)+'" font-size="8" fill="#4D9FFF" text-anchor="start">'+(100-50*g)+'</text>';
+      if(wv.length){
+        var wvl = wmax - (wmax-wmin)*g/2;
+        svg += '<text x="'+(padL-4)+'" y="'+(gy+3)+'" font-size="8" fill="#00C896" text-anchor="end">'+round1(wvl)+'</text>';
+      }
+    }
+    function series(vals, yFn, color){
+      var out='', run=[];
+      function flush(){
+        if(run.length>=2) out += '<polyline points="'+run.join(" ")+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+        else if(run.length===1){ var p=run[0].split(","); out += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="1.8" fill="'+color+'"/>'; }
+        run=[];
+      }
+      for(var i=0;i<vals.length;i++){
+        if(vals[i]==null){ flush(); }
+        else run.push(x(i).toFixed(1)+","+yFn(vals[i]).toFixed(1));
+      }
+      flush();
+      return out;
+    }
+    if(wv.length) svg += series(wRoll, yW, "#00C896");
+    svg += series(aRoll, yA, "#4D9FFF");
+    svg += '<text x="'+padL+'" y="'+(H-4)+'" font-size="8" fill="#5B6070">'+fmtDate(dates[0])+'</text>';
+    svg += '<text x="'+(W-padR)+'" y="'+(H-4)+'" font-size="8" fill="#5B6070" text-anchor="end">'+fmtDate(dates[n-1])+'</text>';
+    svg += '</svg>';
+    return svg;
+  }
+
+  function buildWeightAdherenceHtml(){
+    var weightMap = {};
+    state.weights.forEach(function(w){ weightMap[w.date] = w.weight; });
+    var adhMap = {};
+    Object.keys(state.snapshots).forEach(function(dt){ adhMap[dt] = state.snapshots[dt].overallPct; });
+
+    var html = '<div class="section-title">Weight vs Adherence</div>';
+
+    var allDates = {};
+    Object.keys(weightMap).forEach(function(d){ allDates[d]=1; });
+    Object.keys(adhMap).forEach(function(d){ allDates[d]=1; });
+    var keys = Object.keys(allDates).sort();
+    if(keys.length < 2){
+      html += '<div class="card"><div class="empty-hint">Log weigh-ins and daily check-ins for a couple of weeks — this chart shows whether your weight tracks with how well you follow the plan.</div></div>';
+      return html;
+    }
+
+    var minDate = keys[0], maxDate = keys[keys.length-1];
+    var span = Math.round((new Date(maxDate+"T00:00:00") - new Date(minDate+"T00:00:00"))/86400000);
+    var startDate = span > 120 ? shiftISO(maxDate, -120) : minDate; // cap window for readability
+    var dates = [];
+    for(var dd=startDate; dd<=maxDate; dd=shiftISO(dd,1)) dates.push(dd);
+
+    function rolling(map){
+      return dates.map(function(date){
+        var sum=0, cnt=0;
+        for(var k=0;k<7;k++){ var v = map[shiftISO(date,-k)]; if(v != null){ sum+=v; cnt++; } }
+        return cnt ? sum/cnt : null;
+      });
+    }
+    var wRoll = rolling(weightMap);
+    var aRoll = rolling(adhMap);
+
+    html += '<div class="card chart-card"><div class="chart-wrap">'+buildDualChartSVG(dates, wRoll, aRoll)+'</div>'+
+      '<div class="chart-legend">'+
+      '<span class="lg"><span class="lg-dot" style="background:var(--accent)"></span>Weight (7-day avg)</span>'+
+      '<span class="lg"><span class="lg-dot" style="background:var(--carbs)"></span>Adherence (7-day avg)</span>'+
+      '</div></div>';
+
+    var snapCount = Object.keys(state.snapshots).length;
+    if(snapCount >= 14){
+      var winStart = shiftISO(maxDate, -55); // last 8 weeks
+      var adhVals = [];
+      Object.keys(state.snapshots).forEach(function(dt){ if(dt >= winStart) adhVals.push(state.snapshots[dt].overallPct); });
+      var wFirst=null, wLast=null;
+      for(var i=0;i<dates.length;i++){
+        if(dates[i] >= winStart && wRoll[i] != null){ if(wFirst==null) wFirst = wRoll[i]; wLast = wRoll[i]; }
+      }
+      var parts = [];
+      if(adhVals.length) parts.push('avg adherence '+Math.round(mean(adhVals))+'%');
+      if(wFirst != null && wLast != null){
+        var dLb = round1(wLast - wFirst);
+        parts.push('weight trend '+(dLb>0?'+':(dLb<0?'−':''))+Math.abs(dLb)+' lb');
+      }
+      html += '<div class="card"><div class="analysis-verdict-sub">Over the last 8 weeks: '+(parts.length?parts.join(', '):'not enough overlapping data yet')+'.</div></div>';
+    } else {
+      html += '<div class="card"><div class="empty-hint">Keep logging — '+snapCount+' of 14 days recorded. Two weeks of check-ins unlocks the adherence-vs-results readout.</div></div>';
+    }
+    return html;
+  }
+
   function renderProgress(){
     var html = '';
     html += '<div class="page-title">Progress</div>';
-    html += '<div class="page-sub">Strength across your training block</div>';
+    html += '<div class="page-sub">How your results track with your effort</div>';
+
+    html += buildWeightAdherenceHtml();
+    html += '<div class="section-title">Strength Progress</div>';
 
     var opts = [[4,"4 wk"],[8,"8 wk"],[12,"12 wk"],[0,"All"]];
     html += '<div class="block-selector">';
