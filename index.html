@@ -219,6 +219,31 @@
   .adh-pct{grid-area:pct;text-align:right;font-weight:800;font-size:.85rem;font-variant-numeric:tabular-nums;}
   .adh-detail{grid-area:detail;font-size:.68rem;color:var(--text-faint);}
 
+  /* ---- Weekly adherence ---- */
+  .wk-adh.current{border-color:var(--accent);}
+  .wk-adh-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.6rem;}
+  .wk-adh-title{font-weight:700;font-size:.95rem;}
+  .wk-tag{font-size:.58rem;color:var(--accent);font-weight:800;background:var(--accent-dim);padding:.12rem .4rem;border-radius:5px;vertical-align:middle;text-transform:uppercase;letter-spacing:.03em;margin-left:.2rem;}
+  .wk-adh-range{font-size:.7rem;color:var(--text-faint);margin-top:.15rem;}
+  .wk-adh-pct{font-weight:800;font-size:1.35rem;letter-spacing:-0.02em;flex-shrink:0;}
+  .wk-comps{display:flex;gap:.45rem;}
+  .wk-comp{display:flex;flex-direction:column;align-items:center;gap:.15rem;background:#1D2030;border-radius:9px;padding:.45rem .3rem;flex:1;min-width:0;}
+  .wk-comp-l{font-size:.58rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:.03em;}
+  .wk-comp-v{font-size:.92rem;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;}
+  .wk-comp-v.hit{color:var(--accent);}
+  .streak-card{display:flex;align-items:center;gap:.6rem;}
+  .streak-flame{font-size:1.3rem;flex-shrink:0;}
+  .streak-main{font-weight:800;font-size:.95rem;color:var(--text);flex:1;}
+  .streak-best{font-size:.72rem;color:var(--text-dim);font-weight:700;}
+
+  /* ---- Verdict card ---- */
+  .verdict-card{border-left:3px solid var(--border);}
+  .verdict-card.trend-up{border-left-color:var(--accent);}
+  .verdict-card.trend-down{border-left-color:var(--fat);}
+  .verdict-card.trend-flat{border-left-color:var(--carbs);}
+  .verdict-label{font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:.35rem;}
+  .verdict-text{font-size:.88rem;line-height:1.5;color:var(--text);font-weight:600;}
+
   /* ---- Backup & Restore ---- */
   .backup-btns{display:flex;gap:.5rem;flex-wrap:wrap;}
   .backup-btn{
@@ -1029,6 +1054,7 @@
     if(!s.exerciseLog) s.exerciseLog = {};
     if(!s.weekLog) s.weekLog = {};
     if(s.stepGoal == null) s.stepGoal = 10000;
+    if(s.cardioGoal == null) s.cardioGoal = 5; // weekly cardio-session target
     // Persisted daily adherence snapshots (historical fact — never recomputed
     // from a later plan/goal). Backfilled once from existing daily records.
     if(!s.snapshots){ s.snapshots = {}; s.snapshotsBackfilled = false; }
@@ -1083,7 +1109,7 @@
 
   function exampleState(){
     return {
-      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
       meals: clone(DEFAULT_MEALS),
       training: clone(DEFAULT_TRAINING),
@@ -1099,7 +1125,7 @@
       training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
     }
     return {
-      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
       weights: [],
       meals: meals,
       training: training,
@@ -2289,50 +2315,119 @@
     return '<span class="trend-badge trend-flat">&#8212; Steady</span>';
   }
 
-  // Reads the frozen snapshots (historical fact), newest first.
-  function adherenceDays(){
-    var out = [];
+  function weekDateRange(wk){
+    var start = shiftISO(state.blockStart, (wk-1)*7);
+    return { start: start, end: shiftISO(start, 6) };
+  }
+
+  // Roll the frozen daily snapshots up into whole-week adherence. Training is
+  // measured as sessions-completed vs the weekly lift target (non-rest days in
+  // the plan), so "6 of 6 lifts this week" = 100% training regardless of which
+  // day each fell on. Cardio, diet and steps use their own weekly targets.
+  function weeklyAdherence(){
+    var liftTarget = state.training.filter(function(d){ return !d.rest; }).length || 6;
+    var cardioTarget = state.cardioGoal || 5;
+    var perDay = state.meals.length || 6;
+    var mealTargetWeek = perDay * 7;
+    var byWeek = {};
     Object.keys(state.snapshots).forEach(function(date){
-      out.push({ date:date, snap:state.snapshots[date] });
+      var snap = state.snapshots[date];
+      var wk = weekIndexOf(date, state.blockStart);
+      var w = byWeek[wk] || (byWeek[wk] = { week:wk, meals:0, lifts:0, cardios:0, stepFrac:0, days:0 });
+      w.days++;
+      w.meals += snap.mealsChecked || 0;
+      if(snap.trainingDone) w.lifts++;          // true only when lifted & not a rest day
+      if(snap.cardioDone) w.cardios++;
+      if(snap.stepsPct != null) w.stepFrac += clamp(snap.stepsPct/100, 0, 1);
     });
-    out.sort(function(a,b){ return a.date<b.date?1:(a.date>b.date?-1:0); }); // newest first
-    return out;
+    var curWk = currentWeek();
+    return Object.keys(byWeek).map(Number).sort(function(a,b){ return b-a; }).map(function(wk){
+      var w = byWeek[wk];
+      var trainingPct = liftTarget ? Math.min(100, Math.round(w.lifts/liftTarget*100)) : 0;
+      var cardioPct = cardioTarget ? Math.min(100, Math.round(w.cardios/cardioTarget*100)) : 0;
+      var dietPct = mealTargetWeek ? Math.min(100, Math.round(w.meals/mealTargetWeek*100)) : 0;
+      var stepsPct = Math.min(100, Math.round(w.stepFrac/7*100));
+      var checked = w.meals + w.lifts + w.cardios + w.stepFrac;
+      var planned = mealTargetWeek + liftTarget + cardioTarget + 7;
+      return {
+        week:wk, isCurrent: wk===curWk, range: weekDateRange(wk),
+        trainingPct:trainingPct, cardioPct:cardioPct, dietPct:dietPct, stepsPct:stepsPct,
+        overall: planned ? Math.round(checked/planned*100) : 0,
+        lifts:w.lifts, liftTarget:liftTarget, cardios:w.cardios, cardioTarget:cardioTarget
+      };
+    });
+  }
+
+  // Current run of consecutive most-recent days at/above the threshold. An
+  // unlogged today doesn't break it (we start from yesterday); a gap does.
+  function adherenceStreak(threshold){
+    threshold = threshold || 90;
+    var d = todayStr();
+    if(!state.snapshots[d]) d = shiftISO(d, -1);
+    var streak = 0;
+    while(state.snapshots[d] && state.snapshots[d].overallPct >= threshold){ streak++; d = shiftISO(d, -1); }
+    return streak;
+  }
+  function bestStreak(threshold){
+    threshold = threshold || 90;
+    var dates = Object.keys(state.snapshots).sort();
+    var best=0, cur=0, prev=null;
+    dates.forEach(function(dt){
+      var ok = state.snapshots[dt].overallPct >= threshold;
+      if(ok && prev && shiftISO(prev,1)===dt) cur++;
+      else cur = ok ? 1 : 0;
+      if(cur>best) best=cur;
+      prev = dt;
+    });
+    return best;
   }
 
   function buildAdherenceHtml(){
-    var days = adherenceDays();
-    var html = '<div class="section-title">Plan Adherence</div>';
-    if(!days.length){
-      html += '<div class="card"><div class="empty-hint">Check off meals, lifts, and cardio on the Today tab and each day\'s adherence will be tracked here.</div></div>';
+    var weeks = weeklyAdherence();
+    var html = '<div class="section-title">Plan Adherence &middot; Weekly</div>';
+    if(!weeks.length){
+      html += '<div class="card"><div class="empty-hint">Check off meals, lifts, cardio and steps on the Today tab. Each week rolls up here — e.g. all 6 lifts done = 100% training for the week.</div></div>';
       return html;
     }
 
-    var recent = days.slice(0, 7);
-    var avg7 = Math.round(recent.reduce(function(s,d){ return s+d.snap.overallPct; },0) / recent.length);
-    var all = Math.round(days.reduce(function(s,d){ return s+d.snap.overallPct; },0) / days.length);
+    var current = null;
+    weeks.forEach(function(w){ if(w.isCurrent) current = w; });
+    var completed = weeks.filter(function(w){ return !w.isCurrent; });
+    var thisWeek = current ? current.overall : weeks[0].overall;
+    var avgBase = completed.length ? completed : weeks;
+    var avgWeek = Math.round(avgBase.reduce(function(s,w){ return s+w.overall; },0) / avgBase.length);
 
     html += '<div class="stat-row">';
-    html += '<div class="stat-card"><div class="v '+adherenceClass(avg7)+'-text">'+avg7+'<small>%</small></div><div class="l">Last 7 Days</div></div>';
-    html += '<div class="stat-card"><div class="v '+adherenceClass(all)+'-text">'+all+'<small>%</small></div><div class="l">All-Time Avg</div></div>';
+    html += '<div class="stat-card"><div class="v '+adherenceClass(thisWeek)+'-text">'+thisWeek+'<small>%</small></div><div class="l">This Week</div></div>';
+    html += '<div class="stat-card"><div class="v '+adherenceClass(avgWeek)+'-text">'+avgWeek+'<small>%</small></div><div class="l">Avg / Week</div></div>';
     html += '</div>';
 
-    var ds = todayStr();
-    html += '<div class="card"><div class="adh-list">';
-    days.forEach(function(d){
-      var snap = d.snap;
-      var isToday = d.date === ds;
-      var breakdown = 'Meals '+snap.mealsChecked+'/'+snap.mCount +
-        (snap.restDay ? ' · Rest' : (snap.trainingDone ? ' · Lift' : '')) +
-        (snap.cardioDone ? ' · Cardio' : '') +
-        (snap.steps>0 ? ' · '+fmtK(snap.steps)+' steps' : '');
-      html += '<div class="adh-row">';
-      html += '<div class="adh-date">'+fmtDate(d.date)+(isToday?' <span class="adh-today">Today</span>':'')+'</div>';
-      html += '<div class="adh-bar-wrap"><span class="adh-bar '+adherenceClass(snap.overallPct)+'" style="width:'+snap.overallPct+'%"></span></div>';
-      html += '<div class="adh-pct '+adherenceClass(snap.overallPct)+'-text">'+snap.overallPct+'%</div>';
-      html += '<div class="adh-detail">'+esc(breakdown)+'</div>';
+    var streak = adherenceStreak(90);
+    var best = bestStreak(90);
+    if(streak > 0 || best > 1){
+      html += '<div class="card streak-card">'+
+        '<span class="streak-flame">&#128293;</span>'+
+        '<span class="streak-main">'+(streak>0 ? streak+'-day streak &ge;90%' : 'No active streak')+'</span>'+
+        (best>Math.max(streak,1) ? '<span class="streak-best">best '+best+' days</span>' : '')+
+        '</div>';
+    }
+
+    weeks.forEach(function(w){
+      html += '<div class="card wk-adh'+(w.isCurrent?' current':'')+'">';
+      html += '<div class="wk-adh-head">'+
+        '<div><div class="wk-adh-title">Week '+w.week+(w.isCurrent?' <span class="wk-tag">this week</span>':'')+'</div>'+
+        '<div class="wk-adh-range">'+fmtDate(w.range.start)+' – '+fmtDate(w.range.end)+'</div></div>'+
+        '<div class="wk-adh-pct '+adherenceClass(w.overall)+'-text">'+w.overall+'%</div>'+
+        '</div>';
+      html += '<div class="plan-track" style="margin:.55rem 0 .75rem;"><span class="plan-fill '+adherenceClass(w.overall)+'" style="width:'+w.overall+'%"></span></div>';
+      html += '<div class="wk-comps">'+
+        '<span class="wk-comp"><span class="wk-comp-l">Lifts</span><span class="wk-comp-v'+(w.lifts>=w.liftTarget?' hit':'')+'">'+w.lifts+'/'+w.liftTarget+'</span></span>'+
+        '<span class="wk-comp"><span class="wk-comp-l">Cardio</span><span class="wk-comp-v'+(w.cardios>=w.cardioTarget?' hit':'')+'">'+w.cardios+'/'+w.cardioTarget+'</span></span>'+
+        '<span class="wk-comp"><span class="wk-comp-l">Diet</span><span class="wk-comp-v">'+w.dietPct+'%</span></span>'+
+        '<span class="wk-comp"><span class="wk-comp-l">Steps</span><span class="wk-comp-v">'+w.stepsPct+'%</span></span>'+
+        '</div>';
       html += '</div>';
     });
-    html += '</div></div>';
     return html;
   }
 
@@ -2845,6 +2940,29 @@
         parts.push('weight trend '+(dLb>0?'+':(dLb<0?'−':''))+Math.abs(dLb)+' lb');
       }
       html += '<div class="card"><div class="analysis-verdict-sub">Over the last 8 weeks: '+(parts.length?parts.join(', '):'not enough overlapping data yet')+'.</div></div>';
+
+      // ----- verdict engine: combine weight movement with adherence level -----
+      if(adhVals.length && wFirst != null && wLast != null){
+        var avgAdh = Math.round(mean(adhVals));
+        var trendLb = wLast - wFirst;
+        var stalled = Math.abs(trendLb) <= 1.0;   // ~flat over the window
+        var tier = adherenceClass(avgAdh);         // reuse adh-high/mid/low tiers
+        var verdict, vcls;
+        if(!stalled){
+          verdict = "The scale is moving ("+(trendLb>0?'+':'−')+Math.abs(round1(trendLb))+" lb over 8 weeks) — your current plan is producing change. Keep doing what you're doing.";
+          vcls = "trend-up";
+        } else if(tier === "adh-high"){
+          verdict = "Weight has stalled but your adherence is high — the plan itself likely needs adjusting (nudge calories or training), not more willpower.";
+          vcls = "trend-down";
+        } else if(tier === "adh-low"){
+          verdict = "Weight has stalled and adherence is low — follow the plan you already have consistently before changing anything. The plan hasn't really been tested yet.";
+          vcls = "trend-down";
+        } else {
+          verdict = "Weight is flat with middling adherence ("+avgAdh+"%) — tighten up consistency for 2–3 weeks, then reassess the plan.";
+          vcls = "trend-flat";
+        }
+        html += '<div class="card verdict-card '+vcls+'"><div class="verdict-label">Verdict</div><div class="verdict-text">'+verdict+'</div></div>';
+      }
     } else {
       html += '<div class="card"><div class="empty-hint">Keep logging — '+snapCount+' of 14 days recorded. Two weeks of check-ins unlocks the adherence-vs-results readout.</div></div>';
     }
