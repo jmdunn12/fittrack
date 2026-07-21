@@ -542,6 +542,7 @@
   .ex-edit-row{display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center;}
   .ex-edit-row .field-input{flex:1;min-width:0;}
   .ex-edit-row .field-input.scheme-input{flex:0 0 6.5rem;}
+  .focus-auto{font-size:.72rem;color:var(--accent);font-weight:600;margin-bottom:.7rem;}
 
   /* ---- Ingredient rows (Diet) ---- */
   .lookup-hint{color:var(--text-faint);font-size:.68rem;margin-bottom:1rem;line-height:1.4;}
@@ -1909,6 +1910,72 @@
   var trainingEditMode = false;
   var selectedWeek = null; // set to current week on first training render
 
+  /* --- Muscle-group inference from exercise names --- */
+  var MUSCLE_ORDER = ["Chest","Shoulders","Back","Traps","Rear Delts","Biceps","Triceps","Forearms","Abs","Quads","Hamstrings","Glutes","Calves"];
+  // Rules run in order; a rule fires when any of its keywords appears and none
+  // of its "not" keywords do. All firing rules union their muscles.
+  var MUSCLE_RULES = [
+    { any:["leg curl","lying leg curl","seated leg curl","hamstring curl"], m:["Hamstrings"] },
+    { any:["leg extension"], m:["Quads"] },
+    { any:["leg press","hack squat"], m:["Quads","Glutes"] },
+    { any:["squat"], m:["Quads","Glutes"] },
+    { any:["lunge","split squat","bulgarian","step-up","step up"], m:["Quads","Glutes"] },
+    { any:["romanian","rdl","stiff-leg","stiff leg","good morning"], m:["Hamstrings","Glutes"] },
+    { any:["deadlift"], not:["romanian","rdl","stiff"], m:["Back","Hamstrings","Glutes"] },
+    { any:["calf","calve"], m:["Calves"] },
+    { any:["hip thrust","glute bridge","glute"], m:["Glutes"] },
+    { any:["upright row"], m:["Shoulders","Traps"] },
+    { any:["row"], not:["upright"], m:["Back","Biceps"] },
+    { any:["pulldown","pull-down","pull down","pull-up","pullup","pull up","chin-up","chinup","chin up","lat pull"], m:["Back","Biceps"] },
+    { any:["shrug"], m:["Traps"] },
+    { any:["face pull","rear delt","reverse fly","reverse flye","rear-delt"], m:["Rear Delts"] },
+    { any:["pullover"], m:["Back","Chest"] },
+    { any:["close-grip bench","close grip bench"], m:["Triceps","Chest"] },
+    { any:["bench","chest press","pec deck","pec fly","chest fly","cable crossover","crossover"], m:["Chest","Triceps"] },
+    { any:["incline curl","incline db curl","incline dumbbell curl"], m:["Biceps"] },
+    { any:["incline"], not:["curl"], m:["Chest","Shoulders","Triceps"] },
+    { any:["dip"], m:["Chest","Triceps"] },
+    { any:["push-up","pushup","push up"], m:["Chest","Triceps"] },
+    { any:["fly","flye"], not:["rear","reverse"], m:["Chest"] },
+    { any:["shoulder press","overhead press","ohp","military","arnold","z press"], m:["Shoulders","Triceps"] },
+    { any:["lateral raise","side raise","lat raise","side delt"], m:["Shoulders"] },
+    { any:["front raise"], m:["Shoulders"] },
+    { any:["hammer curl"], m:["Biceps","Forearms"] },
+    { any:["curl"], not:["leg","hamstring"], m:["Biceps"] },
+    { any:["skullcrusher","skull crusher","pushdown","push-down","kickback","triceps","tricep"], m:["Triceps"] },
+    { any:["overhead cable","overhead extension","overhead triceps"], m:["Triceps"] },
+    { any:["crunch","sit-up","situp","plank","ab wheel","hanging leg","russian twist","leg raise","cable crunch"], m:["Abs"] }
+  ];
+
+  function musclesForExercise(name){
+    var s = " " + String(name||"").toLowerCase() + " ";
+    var set = {};
+    MUSCLE_RULES.forEach(function(r){
+      var hit = r.any.some(function(k){ return s.indexOf(k) >= 0; });
+      if(!hit) return;
+      if(r.not && r.not.some(function(k){ return s.indexOf(k) >= 0; })) return;
+      r.m.forEach(function(mm){ set[mm] = 1; });
+    });
+    return Object.keys(set);
+  }
+
+  function musclesForDay(d){
+    var set = {};
+    (d.ex || []).forEach(function(e){
+      musclesForExercise(e[0]).forEach(function(mm){ set[mm] = 1; });
+    });
+    return Object.keys(set).sort(function(a,b){ return MUSCLE_ORDER.indexOf(a) - MUSCLE_ORDER.indexOf(b); });
+  }
+
+  // What to show under a day title: auto muscles for lifting days, else fallback.
+  function dayFocusText(d){
+    if(d.rest) return d.focus || "Recovery";
+    var muscles = musclesForDay(d);
+    if(muscles.length) return muscles.join(" / ");
+    if(d.focus) return d.focus;
+    return d.ex && d.ex.length ? "Mixed" : "Tap Edit to add exercises";
+  }
+
   function parseSetCount(scheme){
     var m = /^(\d+)/.exec(scheme||"");
     var n = m ? parseInt(m[1],10) : 3;
@@ -1988,16 +2055,16 @@
       html += '<div class="day-card'+(d.rest?' rest':'')+(isOpen?' open':'')+'" data-day="'+d.day+'">';
       html += '<div class="day-head">';
       html += '<div class="day-head-l"><div class="day-num">'+d.day+'</div>';
-      html += '<div><div class="day-title">'+esc(d.title)+'</div><div class="day-focus">'+esc(d.focus)+'</div></div></div>';
+      html += '<div><div class="day-title">'+esc(d.title)+'</div><div class="day-focus">'+esc(dayFocusText(d))+'</div></div></div>';
       html += '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
       html += '</div>';
       html += '<div class="day-body"><div class="day-body-inner">';
 
       if(trainingEditMode){
-        html += '<div class="field-row">'+
-          '<input class="field-input" data-day-idx="'+di+'" data-day-field="title" value="'+escAttr(d.title)+'">'+
-          '<input class="field-input" data-day-idx="'+di+'" data-day-field="focus" value="'+escAttr(d.focus)+'">'+
-          '</div>';
+        html += '<input class="field-input" style="width:100%;margin-bottom:.5rem;" data-day-idx="'+di+'" data-day-field="title" value="'+escAttr(d.title)+'">';
+        if(!d.rest){
+          html += '<div class="focus-auto">Targets (auto): '+esc(musclesForDay(d).join(" / ") || "add exercises below")+'</div>';
+        }
         d.ex.forEach(function(e, ei){
           html += '<div class="ex-edit-row">'+
             '<input class="field-input" data-day-idx="'+di+'" data-ex-idx="'+ei+'" data-ex-field="0" value="'+escAttr(e[0])+'">'+
@@ -2096,6 +2163,16 @@
           var fi = parseInt(inp.getAttribute("data-ex-field"),10);
           state.training[di].ex[ei][fi] = inp.value;
           saveState();
+          if(fi === 0){ // exercise name changed — refresh the auto muscle targets live
+            var card = inp.closest(".day-card");
+            if(card){
+              var muscles = musclesForDay(state.training[di]);
+              var autoEl = card.querySelector(".focus-auto");
+              if(autoEl) autoEl.textContent = "Targets (auto): " + (muscles.join(" / ") || "add exercises below");
+              var focusEl = card.querySelector(".day-focus");
+              if(focusEl) focusEl.textContent = dayFocusText(state.training[di]);
+            }
+          }
         });
       });
 
