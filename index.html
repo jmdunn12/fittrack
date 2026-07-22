@@ -2479,12 +2479,12 @@
     html += '<div class="stat-card"><div class="v '+adherenceClass(avgWeek)+'-text">'+avgWeek+'<small>%</small></div><div class="l">Avg / Week</div></div>';
     html += '</div>';
 
-    var streak = adherenceStreak(90);
-    var best = bestStreak(90);
+    var streak = adherenceStreak(85);
+    var best = bestStreak(85);
     if(streak > 0 || best > 1){
       html += '<div class="card streak-card">'+
         '<span class="streak-flame">&#128293;</span>'+
-        '<span class="streak-main">'+(streak>0 ? streak+'-day streak &ge;90%' : 'No active streak')+'</span>'+
+        '<span class="streak-main">'+(streak>0 ? streak+'-day streak &ge;85%' : 'No active streak')+'</span>'+
         (best>Math.max(streak,1) ? '<span class="streak-best">best '+best+' days</span>' : '')+
         '</div>';
     }
