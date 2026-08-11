@@ -81,6 +81,12 @@
   .im-sub-label{flex:1;min-width:0;font-size:.82rem;font-weight:600;}
   .im-sub-sets{font-size:.72rem;color:var(--text-dim);font-weight:700;flex-shrink:0;}
   .im-anchor-tag{font-size:.56rem;font-weight:800;color:var(--fat);background:#FFD16622;padding:.12rem .35rem;border-radius:5px;letter-spacing:.05em;flex-shrink:0;}
+  .im-swim-set{font-size:.82rem;margin-top:.55rem;line-height:1.45;}
+  .im-day-head{font-size:.78rem;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:.95rem 0 .45rem;}
+  .im-load-input{width:4.6rem;background:#0D0F17;border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:.8rem;font-weight:700;padding:.5rem .3rem;border-radius:8px;text-align:center;flex-shrink:0;}
+  .im-load-input:focus{outline:none;border-color:var(--accent);}
+  .im-lift-warn{border-color:var(--danger)!important;}
+  .im-lift-warn .card-title{color:var(--danger);}
   h1,h2,h3,p{margin:0;}
   .page-title{font-size:1.5rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:.25rem;}
   .today-select{
@@ -3749,19 +3755,9 @@
     });
   }
 
-  /* ===================== IRONMAN MODE: TABS (shell) ===================== */
-  /* Placeholder renderers — the plan data, adherence engine and full tabs
-     land in Parts 3-5. The Today shell already wires the ONE shared store
-     (bodyweight) through the existing setWeight() so isolation is testable. */
+  /* ===================== IRONMAN MODE: TABS ===================== */
 
   var IM_RACE_DAY = "2027-03-14";
-
-  function renderImShell(title, note){
-    var html = '<div class="page-title">'+title+'</div>';
-    html += '<div class="page-sub">Ironman mode &middot; race day '+fmtFullDate(IM_RACE_DAY)+'</div>';
-    html += '<div class="card"><div class="card-title">Coming next</div><div class="card-sub">'+note+'</div></div>';
-    return html;
-  }
 
   function renderImToday(){
     var ds = todayStr();
@@ -3868,10 +3864,353 @@
     });
   }
 
-  function renderImTraining(){ document.getElementById("content").innerHTML = renderImShell("Training", "This week's swim, bike and run sessions with full prescriptions (Part 5)."); }
-  function renderImLifts(){ document.getElementById("content").innerHTML = renderImShell("Lifts", "The four lift sessions with phase-adjusted sets, anchor highlights and load tracking (Part 5)."); }
-  function renderImDiet(){ document.getElementById("content").innerHTML = renderImShell("Diet", "Day-type meals with macros and shared checkboxes (Part 5)."); }
-  function renderImProgress(){ document.getElementById("content").innerHTML = renderImShell("Progress", "Weight vs target line, weekly adherence history and anchor-lift baseline tracking (Part 5)."); }
+  function imOutsideCard(){
+    return '<div class="card"><div class="card-title">Outside the plan window</div>'+
+      '<div class="card-sub">The 31-week block runs '+fmtDate(IM_WEEK_STARTS[0])+', 2026 &ndash; race day '+fmtFullDate(IM_RACE_DAY)+', 2027.</div></div>';
+  }
+  function imDayLabel(dateStr){
+    var parts = dateStr.split("-");
+    var d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    return d.toLocaleDateString(undefined, {weekday:"long", month:"short", day:"numeric"});
+  }
+  // Bind every [data-imkey] element to toggle its check and re-render.
+  function imBindChecks(rerender){
+    document.querySelectorAll("[data-imkey]").forEach(function(el){
+      el.addEventListener("click", function(){
+        imToggle(el.getAttribute("data-imdate") || todayStr(), el.getAttribute("data-imkey"));
+        rerender();
+      });
+    });
+  }
+
+  /* ----- TRAINING: this week's swim/bike/run with prescriptions ----- */
+  function renderImTraining(){
+    var ds = todayStr(), wk = imWeekOf(ds);
+    var html = '<div class="page-title">Training</div>';
+    if(!wk){
+      html += '<div class="page-sub">Ironman mode</div>' + imOutsideCard();
+      document.getElementById("content").innerHTML = html;
+      return;
+    }
+    var phase = imPhaseOf(wk), vol = imVolumeOf(wk), range = imWeekRange(wk);
+    html += '<div class="page-sub">Week '+wk+' &middot; '+(phase==='TAPER'?'Taper':'Phase '+phase)+' &middot; '+fmtDate(range.start)+' &ndash; '+fmtDate(range.end)+'</div>';
+
+    html += '<div class="stat-row">';
+    html += '<div class="stat-card"><div class="v">'+vol[1]+'<small> h</small></div><div class="l">Endurance</div></div>';
+    html += '<div class="stat-card"><div class="v" style="font-size:.8rem;line-height:1.3;">'+esc(vol[2])+'</div><div class="l">Long bike</div></div>';
+    html += '<div class="stat-card"><div class="v" style="font-size:.8rem;line-height:1.3;">'+esc(vol[3])+'</div><div class="l">Long run</div></div>';
+    html += '</div>';
+
+    var ss = imSwimSetsOf(wk);
+    html += '<div class="card">';
+    html += '<div class="card-title">Swim sessions this week</div>';
+    html += '<div class="card-sub">Every swim: '+IM_SWIM_FRAME+'</div>';
+    if(ss){
+      html += '<div class="im-swim-set"><b>Monday main set:</b> '+esc(ss.mon)+'</div>';
+      html += '<div class="im-swim-set"><b>Thursday main set:</b> '+esc(ss.thu)+'</div>';
+    } else {
+      html += '<div class="im-swim-set">Taper &mdash; easy technique swimming only, no prescribed main sets.</div>';
+    }
+    html += '<div class="card-sub" style="margin-top:.55rem;">Drills: '+IM_SWIM_DRILLS.join(', ')+'</div>';
+    html += '</div>';
+
+    html += '<div class="section-title">Sessions</div>';
+    var checksAll = imState.checks;
+    for(var d = range.start; d <= range.end; d = shiftISO(d, 1)){
+      if(d === IM_RACE_DAY){
+        html += '<div class="im-day-head" style="color:var(--carbs);">'+imDayLabel(d)+' &mdash; RACE DAY</div>';
+        continue;
+      }
+      var plan = imDayPlan(d);
+      var sessions = plan ? plan.items.training : [];
+      html += '<div class="im-day-head">'+imDayLabel(d)+(d === ds ? ' &middot; <span style="color:var(--accent);">today</span>' : '')+'</div>';
+      if(!sessions.length){
+        html += '<div class="card-sub" style="margin:0 0 .3rem .1rem;">No endurance session.</div>';
+        continue;
+      }
+      var dayChecks = checksAll[d] || {};
+      sessions.forEach(function(it){
+        var checked = !!dayChecks[it.key];
+        var extra = it.long ? (it.cat === 'bike' ? vol[2] : vol[3]) : null;
+        html += '<div class="meal-item'+(checked?' checked':'')+'" data-imkey="'+it.key+'" data-imdate="'+d+'">';
+        html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+        html += '<div class="meal-info"><div class="meal-name">'+esc(it.label)+'</div>'+(extra && extra !== '—' ? '<div class="meal-name-sub">'+esc(extra)+'</div>' : '')+'</div>';
+        html += '<span class="im-cat-chip '+it.cat+'">'+it.cat+'</span>';
+        if(it.optional) html += '<span class="im-opt-tag">optional</span>';
+        html += '</div>';
+      });
+    }
+    document.getElementById("content").innerHTML = html;
+    imBindChecks(renderImTraining);
+  }
+
+  /* ----- LIFTS: the four sessions, loads tracked per week ----- */
+  function renderImLifts(){
+    var ds = todayStr(), wk = imWeekOf(ds);
+    var html = '<div class="page-title">Lifts</div>';
+    if(!wk){
+      html += '<div class="page-sub">Ironman mode</div>' + imOutsideCard();
+      document.getElementById("content").innerHTML = html;
+      return;
+    }
+    var phase = imPhaseOf(wk), range = imWeekRange(wk);
+    html += '<div class="page-sub">Week '+wk+' &middot; '+(phase==='TAPER'?'Taper':'Phase '+phase)+'</div>';
+    if(phase === 'C') html += '<div class="card"><div class="card-sub">Phase C: accessories drop to 2 sets. The three ANCHOR lifts stay at 4 x 5 and full load.</div></div>';
+    if(wk === 29) html += '<div class="card"><div class="card-sub">Taper week 29: all four sessions, every lift at 2 sets.</div></div>';
+
+    function dateForWd(wd){
+      for(var d = range.start; d <= range.end; d = shiftISO(d, 1)){ if(imWeekdayOf(d) === wd) return d; }
+      return null;
+    }
+
+    if(wk === 31){
+      html += '<div class="card" style="border-color:var(--carbs);"><div class="card-title" style="color:var(--carbs);">Race week — no lifting</div>';
+      html += '<div class="card-sub">The work is done. Stay loose, stay fresh.</div></div>';
+    } else if(wk === 30){
+      var fbDate = dateForWd(1);
+      var fbChecked = fbDate && imState.checks[fbDate] && imState.checks[fbDate]['l_fullbody'];
+      html += '<div class="card"><div class="card-title">Taper week 30</div><div class="card-sub">One light full-body session, nothing heavy.</div></div>';
+      html += '<div class="meal-item'+(fbChecked?' checked':'')+'" data-imkey="l_fullbody" data-imdate="'+fbDate+'">';
+      html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+      html += '<div class="meal-info"><div class="meal-name">Light full-body (one session, easy)</div><div class="meal-name-sub">'+imDayLabel(fbDate)+'</div></div>';
+      html += '</div>';
+    } else {
+      IM_LIFT_ORDER.forEach(function(k){
+        var s = IM_LIFTS[k];
+        var d = dateForWd(s.day); // null in week 1 for Monday (6-day week)
+        var dayChecks = (d && imState.checks[d]) || {};
+        var sChecked = !!dayChecks['l_'+k];
+        html += '<div class="card" style="padding-bottom:.6rem;">';
+        html += '<div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;"><span>'+esc(s.name)+(wk===29?' — 2 sets':'')+'</span>';
+        html += '<span class="card-sub" style="margin:0;flex-shrink:0;">'+(d ? imDayLabel(d) : 'not in week 1')+'</span></div>';
+        if(d){
+          html += '<div class="meal-item'+(sChecked?' checked':'')+'" style="margin-top:.7rem;" data-imkey="l_'+k+'" data-imdate="'+d+'">';
+          html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+          html += '<div class="meal-info"><div class="meal-name">Session done</div></div>';
+          html += '</div>';
+        }
+        html += '<div class="im-subs" style="margin-left:0;">';
+        s.ex.forEach(function(ex, i){
+          var exChecked = d && dayChecks['lx_'+k+'_'+i];
+          var load = (imState.liftLoads[ex[0]] || {})[wk];
+          html += '<div class="im-sub'+(exChecked?' checked':'')+'">';
+          html += '<div class="sc" data-imkey="lx_'+k+'_'+i+'" '+(d ? 'data-imdate="'+d+'"' : 'data-imdisabled="1"')+' style="padding:2px;"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+          html += '<span class="im-sub-label">'+esc(ex[0])+'</span>';
+          if(ex[2]) html += '<span class="im-anchor-tag">ANCHOR</span>';
+          html += '<span class="im-sub-sets">'+esc(imLiftSetsFor(ex, wk))+'</span>';
+          html += '<input class="im-load-input" data-exname="'+escAttr(ex[0])+'" type="number" inputmode="decimal" step="2.5" placeholder="lb" value="'+(load != null ? escAttr(load) : '')+'">';
+          html += '</div>';
+        });
+        html += '</div></div>';
+      });
+    }
+    document.getElementById("content").innerHTML = html;
+    document.querySelectorAll("[data-imkey]").forEach(function(el){
+      el.addEventListener("click", function(){
+        if(el.getAttribute("data-imdisabled")) return;
+        imToggle(el.getAttribute("data-imdate"), el.getAttribute("data-imkey"));
+        renderImLifts();
+      });
+    });
+    document.querySelectorAll(".im-load-input").forEach(function(inp){
+      inp.addEventListener("change", function(){
+        var name = inp.getAttribute("data-exname");
+        var v = parseFloat(inp.value);
+        if(!imState.liftLoads[name]) imState.liftLoads[name] = {};
+        if(isNaN(v) || v <= 0) delete imState.liftLoads[name][wk];
+        else imState.liftLoads[name][wk] = v;
+        imSave();
+      });
+    });
+  }
+
+  /* ----- DIET: today's meals, shared checkboxes, phase average ----- */
+  function renderImDiet(){
+    var ds = todayStr(), wk = imWeekOf(ds);
+    var html = '<div class="page-title">Diet</div>';
+    if(!wk){
+      html += '<div class="page-sub">Ironman mode</div>' + imOutsideCard();
+      document.getElementById("content").innerHTML = html;
+      return;
+    }
+    if(ds === IM_RACE_DAY){
+      html += '<div class="page-sub">Race day</div>';
+      html += '<div class="card" style="border-color:var(--carbs);"><div class="card-title" style="color:var(--carbs);">Race-day fueling</div><div class="card-sub">Eat per your race plan — carbs early, fluids and sodium on schedule. No checklist today.</div></div>';
+      document.getElementById("content").innerHTML = html;
+      return;
+    }
+    var diet = imDietFor(ds), totals = imDietTotals(diet.meals);
+    var checks = imState.checks[ds] || {};
+    html += '<div class="page-sub">'+diet.label+' &middot; '+fmtFullDate(ds)+'</div>';
+
+    html += '<div class="target-strip">';
+    html += '<div class="target-pill"><div class="n">'+totals.kcal+'</div><div class="l">kcal</div></div>';
+    html += '<div class="target-pill"><div class="n" style="color:var(--protein);">'+totals.p+'g</div><div class="l">Protein</div></div>';
+    html += '<div class="target-pill"><div class="n" style="color:var(--carbs);">'+totals.c+'g</div><div class="l">Carbs</div></div>';
+    html += '<div class="target-pill"><div class="n" style="color:var(--fat);">'+totals.f+'g</div><div class="l">Fat</div></div>';
+    html += '</div>';
+
+    if(imIsRecovery(wk)) html += '<div class="card" style="border-color:#3A2A1C;"><div class="card-sub"><b style="color:var(--fat);">Recovery week:</b> eating at maintenance all 7 days. Weight holding or rising 1-2 lbs is expected.</div></div>';
+
+    diet.meals.forEach(function(m, i){
+      var checked = !!checks['d'+i];
+      html += '<div class="meal-item'+(checked?' checked':'')+'" data-imkey="d'+i+'" data-imdate="'+ds+'">';
+      html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+      html += '<div class="meal-info"><div class="meal-name">'+esc(m[0])+' &middot; '+imMealKcal(m)+' kcal</div><div class="meal-name-sub">'+esc(m[1])+'</div></div>';
+      html += '<div class="meal-macros">'+
+        '<span class="macro-chip p">P'+m[2]+'</span>'+
+        '<span class="macro-chip c">C'+m[3]+'</span>'+
+        '<span class="macro-chip f">F'+m[4]+'</span>'+
+        '</div>';
+      html += '</div>';
+    });
+
+    // Phase weekly average: 5 standard + 2 long days (recovery weeks eat the
+    // recovery table all 7 days).
+    var avg;
+    if(imIsRecovery(wk)) avg = imDietTotals(IM_DIET.recovery).kcal;
+    else {
+      var ph = imPhaseOf(wk); if(ph === 'TAPER') ph = 'C';
+      avg = Math.round((5 * imDietTotals(IM_DIET[ph+'_standard']).kcal + 2 * imDietTotals(IM_DIET[ph+'_long']).kcal) / 7);
+    }
+    html += '<div class="card"><div class="card-sub">Weekly average for '+(imIsRecovery(wk) ? 'a recovery week' : 'this phase')+': <b style="color:var(--text);">'+avg+' kcal/day</b></div></div>';
+
+    document.getElementById("content").innerHTML = html;
+    imBindChecks(renderImDiet);
+  }
+
+  /* ----- PROGRESS: weight vs target, adherence history, anchor loads ----- */
+
+  function imWeightChartSVG(actualByWeek){
+    var W=320, H=170, padL=34, padR=10, padT=14, padB=22;
+    var innerW=W-padL-padR, innerH=H-padT-padB;
+    function x(w){ return padL + innerW*(w-1)/30; }
+    var all = IM_WEIGHT_TARGETS.slice();
+    actualByWeek.forEach(function(v){ if(v != null) all.push(v); });
+    var min = Math.min.apply(null, all), max = Math.max.apply(null, all);
+    if(min === max){ min -= 2; max += 2; }
+    var pad = (max-min)*0.12; min -= pad; max += pad;
+    function y(v){ return padT + innerH*(1-(v-min)/(max-min)); }
+    var svg = '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">';
+    for(var g=0; g<=2; g++){
+      var gy = padT + innerH*g/2;
+      svg += '<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+gy+'" y2="'+gy+'" stroke="#222536" stroke-width="1"/>';
+      svg += '<text x="'+(padL-4)+'" y="'+(gy+3)+'" font-size="8" fill="#8A8F9E" text-anchor="end">'+round1(max - (max-min)*g/2)+'</text>';
+    }
+    // target line (dashed)
+    var tpts = IM_WEIGHT_TARGETS.map(function(v, i){ return x(i+1).toFixed(1)+','+y(v).toFixed(1); });
+    svg += '<polyline points="'+tpts.join(' ')+'" fill="none" stroke="#FFD166" stroke-width="1.5" stroke-dasharray="4 3" opacity=".8"/>';
+    // actual (gapped)
+    var run=[], out='';
+    function flush(){
+      if(run.length>=2) out += '<polyline points="'+run.join(' ')+'" fill="none" stroke="#00C896" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+      else if(run.length===1){ var p=run[0].split(','); out += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="2.4" fill="#00C896"/>'; }
+      run=[];
+    }
+    for(var w=1; w<=31; w++){
+      var v = actualByWeek[w-1];
+      if(v == null) flush(); else run.push(x(w).toFixed(1)+','+y(v).toFixed(1));
+    }
+    flush();
+    svg += out;
+    svg += '<text x="'+padL+'" y="'+(H-4)+'" font-size="8" fill="#5B6070">Wk 1</text>';
+    svg += '<text x="'+(W-padR)+'" y="'+(H-4)+'" font-size="8" fill="#5B6070" text-anchor="end">Wk 31 · race</text>';
+    svg += '</svg>';
+    return svg;
+  }
+
+  var IM_ANCHOR_NAMES = ['Back squat','Weighted pull-up','Incline barbell press'];
+
+  function renderImProgress(){
+    var ds = todayStr(), wk = imWeekOf(ds);
+    var effWk = wk || (ds > IM_RACE_DAY ? 31 : 0);
+    var html = '<div class="page-title">Progress</div>';
+    html += '<div class="page-sub">Ironman mode'+(wk ? ' &middot; week '+wk+' of 31' : '')+'</div>';
+
+    // 1) weight vs target
+    var actualByWeek = [];
+    for(var i=0;i<31;i++) actualByWeek.push(null);
+    state.weights.forEach(function(en){
+      var w = imWeekOf(en.date);
+      if(w) actualByWeek[w-1] = en.weight; // weights are date-sorted: latest in week wins
+    });
+    var haveActual = actualByWeek.some(function(v){ return v != null; });
+    html += '<div class="card">';
+    html += '<div class="card-title">Weight vs target</div>';
+    html += '<div class="card-sub" style="margin-bottom:.5rem;"><span style="color:var(--accent);">&#9644;</span> you &nbsp; <span style="color:var(--fat);">&#9644;</span> target</div>';
+    html += imWeightChartSVG(actualByWeek);
+    if(wk){
+      var latest = state.weights.length ? state.weights[state.weights.length-1].weight : null;
+      var tgt = imWeightTargetOf(wk);
+      if(latest != null){
+        var diff = round1(latest - tgt);
+        html += '<div class="card-sub" style="margin-top:.4rem;">Latest '+round1(latest)+' lb &middot; week-'+wk+' target '+tgt+' lb &middot; <b style="color:'+(Math.abs(diff)<=1 ? 'var(--accent)' : 'var(--fat)')+';">'+(diff>0?'+':'')+diff+' lb</b></div>';
+      }
+    }
+    if(!haveActual) html += '<div class="card-sub" style="margin-top:.4rem;">Log weigh-ins on the Today tab — they plot here against the plan.</div>';
+    html += '</div>';
+
+    // 2) weekly adherence history
+    html += '<div class="section-title">Weekly adherence</div>';
+    var any = false;
+    if(effWk >= 1){
+      for(var w2 = Math.min(effWk, 31); w2 >= 1; w2--){
+        var sc = imWeekScore(w2);
+        if(!sc.daysCounted || sc.overall == null) continue;
+        any = true;
+        var o = imPct(sc.overall);
+        html += '<div class="card wk-adh'+(w2===wk?' current':'')+'">';
+        html += '<div class="wk-adh-head"><div><div class="wk-adh-title">Week '+w2+(w2===wk?' <span class="wk-tag">this week</span>':'')+'</div>';
+        var rg = imWeekRange(w2);
+        html += '<div class="wk-adh-range">'+fmtDate(rg.start)+' &ndash; '+fmtDate(rg.end)+'</div></div>';
+        html += '<div class="wk-adh-pct '+adherenceClass(o)+'-text">'+o+'%</div></div>';
+        html += '<div class="plan-track" style="margin:.55rem 0 .75rem;"><span class="plan-fill '+adherenceClass(o)+'" style="width:'+o+'%"></span></div>';
+        html += '<div class="wk-comps">';
+        IM_CATS.forEach(function(cat){
+          var p = imPct(sc.cats[cat]);
+          html += '<span class="wk-comp"><span class="wk-comp-l">'+cat.charAt(0).toUpperCase()+cat.slice(1)+'</span><span class="wk-comp-v'+(p===100?' hit':'')+'">'+(p==null?'&mdash;':p+'%')+'</span></span>';
+        });
+        html += '</div></div>';
+      }
+    }
+    if(!any) html += '<div class="card"><div class="empty-hint">Check off meals, lifts and sessions on the Today tab — each week rolls up here as diet / lifting / training percentages.</div></div>';
+
+    // 3) anchor lifts vs week-1 baseline
+    html += '<div class="section-title">Anchor lifts vs baseline</div>';
+    var warns = [];
+    var anchorHtml = '';
+    IM_ANCHOR_NAMES.forEach(function(name){
+      var loads = imState.liftLoads[name] || {};
+      var weeks = Object.keys(loads).map(Number).sort(function(a,b){ return a-b; });
+      if(!weeks.length){
+        anchorHtml += '<div class="card"><div class="card-title" style="font-size:.9rem;">'+esc(name)+'</div><div class="card-sub">No loads logged yet — enter your top-set weight on the Lifts tab.</div></div>';
+        return;
+      }
+      var baseline = loads[weeks[0]];
+      var pcts = weeks.map(function(w){ return loads[w]/baseline*100; });
+      var latestPct = pcts[pcts.length-1];
+      // warning: the three most recent logged weeks are consecutive and ALL
+      // sit 10%+ below the week-1 baseline
+      if(weeks.length >= 3){
+        var l3w = weeks.slice(-3), l3p = pcts.slice(-3);
+        if(l3w[2]-l3w[0] === 2 && l3p.every(function(p){ return p <= 90; })) warns.push(name);
+      }
+      var cls = latestPct <= 90 ? 'var(--danger)' : (latestPct < 100 ? 'var(--fat)' : 'var(--accent)');
+      anchorHtml += '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;font-size:.9rem;">';
+      anchorHtml += '<span>'+esc(name)+'</span><span style="color:'+cls+';">'+Math.round(latestPct)+'% of baseline</span></div>';
+      anchorHtml += '<div class="card-sub" style="margin-top:.3rem;display:flex;justify-content:space-between;align-items:center;">';
+      anchorHtml += '<span>Wk '+weeks[0]+' baseline '+baseline+' lb &middot; latest '+loads[weeks[weeks.length-1]]+' lb (wk '+weeks[weeks.length-1]+')</span>';
+      anchorHtml += buildSparkSVG(pcts);
+      anchorHtml += '</div></div>';
+    });
+    if(warns.length){
+      html += '<div class="card im-lift-warn"><div class="card-title">Strength is sliding</div>';
+      html += '<div class="card-sub">'+warns.map(esc).join(' and ')+' ha'+(warns.length>1?'ve':'s')+' sat 10%+ below the baseline for 3 straight weeks. Cut endurance volume 25% until strength recovers.</div></div>';
+    }
+    html += anchorHtml;
+
+    document.getElementById("content").innerHTML = html;
+  }
 
   /* ===================== TAB CONTROL ===================== */
 
