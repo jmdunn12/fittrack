@@ -54,6 +54,17 @@
     padding:calc(1rem + var(--safe-t)) 1rem calc(6.5rem + var(--safe-b));
     min-height:100dvh;
   }
+  /* ---- Mode switcher (header) ---- */
+  .mode-bar{padding:calc(.6rem + var(--safe-t)) 1rem 0;}
+  #app.has-modebar main{padding-top:1rem;min-height:0;}
+  .mode-seg{display:flex;background:#0D0F17;border:1px solid var(--border);border-radius:13px;padding:3px;gap:3px;}
+  .mode-opt{
+    flex:1;min-height:44px;background:none;border:none;border-radius:10px;
+    color:var(--text-dim);font-family:inherit;font-weight:800;font-size:.85rem;letter-spacing:.01em;
+  }
+  .mode-opt.active[data-mode="bb"]{background:var(--accent);color:#062019;}
+  .mode-opt.active[data-mode="ironman"]{background:var(--carbs);color:#061426;}
+  .mode-opt:not(.active):active{background:rgba(255,255,255,0.04);}
   h1,h2,h3,p{margin:0;}
   .page-title{font-size:1.5rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:.25rem;}
   .today-select{
@@ -661,29 +672,14 @@
 </head>
 <body>
 <div id="app">
+  <header class="mode-bar" id="modeBar" style="display:none;">
+    <div class="mode-seg">
+      <button class="mode-opt" data-mode="bb">Bodybuilding</button>
+      <button class="mode-opt" data-mode="ironman">Ironman</button>
+    </div>
+  </header>
   <main id="content"></main>
-  <nav class="tabbar" id="tabbar">
-    <button class="tabbtn" data-tab="today">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-      Today
-    </button>
-    <button class="tabbtn" data-tab="diet">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2v8a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V2"/><path d="M9 12v10"/><path d="M17 2c-1.8 1.6-2 3.5-2 6s.5 3 2 4v10"/></svg>
-      Diet
-    </button>
-    <button class="tabbtn" data-tab="training">
-      <svg viewBox="0 0 24 24" fill="currentColor"><rect x="1" y="9.5" width="3.5" height="5" rx="1"/><rect x="19.5" y="9.5" width="3.5" height="5" rx="1"/><rect x="5.5" y="8" width="2.8" height="8" rx="1"/><rect x="15.7" y="8" width="2.8" height="8" rx="1"/><rect x="8.3" y="11" width="7.4" height="2" rx="0.5"/></svg>
-      Training
-    </button>
-    <button class="tabbtn" data-tab="progress">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 16 8.5 11 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-      Progress
-    </button>
-    <button class="tabbtn" data-tab="log">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
-      Log
-    </button>
-  </nav>
+  <nav class="tabbar" id="tabbar"></nav>
 </div>
 
 <script>
@@ -1011,6 +1007,14 @@
 
   var STORE_KEY = "fittrack.state.v1";
 
+  /* Ironman mode storage — fully namespaced under wft_im_*. Ironman code
+     never reads or writes the bodybuilding store above; bodyweight is the
+     one shared thing (same body), accessed through the existing
+     state.weights / setWeight(). */
+  var MODE_KEY = "fittrack.mode";           // 'bb' | 'ironman'
+  var IM_STORE_KEY = "wft_im_state.v1";
+  var IM_LAST_TAB_KEY = "wft_im_lastTab";
+
   // localStorage can throw (Safari private mode, corrupted profiles). A bad
   // key must degrade to "no data", never white-screen the app.
   function lsGet(key){
@@ -1148,6 +1152,23 @@
   // Persist immediately so load-time migrations (dedupe, engine flags) are
   // written back even if the user closes the app without touching anything.
   if(state) saveState();
+
+  /* ===================== IRONMAN MODE: STORAGE ===================== */
+
+  function imLoadState(){
+    var s = null;
+    var raw = lsGet(IM_STORE_KEY);
+    if(raw){ try{ s = JSON.parse(raw); }catch(e){ s = null; } }
+    if(!s || typeof s !== "object" || Array.isArray(s)) s = {};
+    if(!s.checks || typeof s.checks !== "object") s.checks = {};       // per-date {itemKey:true}
+    if(!s.liftLoads || typeof s.liftLoads !== "object") s.liftLoads = {}; // per-exercise load history
+    return s;
+  }
+  var imState = imLoadState();
+  function imSave(){ lsSet(IM_STORE_KEY, JSON.stringify(imState)); }
+
+  // Which world the app is showing. Persisted; defaults to bodybuilding.
+  var mode = lsGet(MODE_KEY) === "ironman" ? "ironman" : "bb";
 
   // Ask the browser to keep this app's data persistent (reduces automatic
   // eviction). Note: this does NOT survive the user deleting the app — that
@@ -3321,34 +3342,151 @@
     });
   }
 
+  /* ===================== IRONMAN MODE: TABS (shell) ===================== */
+  /* Placeholder renderers — the plan data, adherence engine and full tabs
+     land in Parts 3-5. The Today shell already wires the ONE shared store
+     (bodyweight) through the existing setWeight() so isolation is testable. */
+
+  var IM_RACE_DAY = "2027-03-14";
+
+  function renderImShell(title, note){
+    var html = '<div class="page-title">'+title+'</div>';
+    html += '<div class="page-sub">Ironman mode &middot; race day '+fmtFullDate(IM_RACE_DAY)+'</div>';
+    html += '<div class="card"><div class="card-title">Coming next</div><div class="card-sub">'+note+'</div></div>';
+    return html;
+  }
+
+  function renderImToday(){
+    var days = Math.round((new Date(IM_RACE_DAY+"T00:00:00") - new Date(todayStr()+"T00:00:00"))/(24*3600*1000));
+    var html = '<div class="page-title">Today</div>';
+    html += '<div class="page-sub">Ironman mode &middot; '+fmtFullDate(todayStr())+'</div>';
+    html += '<div class="card"><div class="card-title">'+(days>=0 ? days+' days to race day' : 'Race day has passed')+'</div>';
+    html += '<div class="card-sub">'+fmtFullDate(IM_RACE_DAY)+'. The daily checklist, week/phase resolver and adherence scoring arrive with the plan engine (Parts 3-4).</div></div>';
+
+    // Bodyweight — the one store shared with bodybuilding mode.
+    var ds = todayStr(), saved = "";
+    for(var i=0;i<state.weights.length;i++){ if(state.weights[i].date === ds){ saved = state.weights[i].weight; break; } }
+    html += '<div class="card">';
+    html += '<div class="card-title">Bodyweight</div>';
+    html += '<div class="card-sub" style="margin-bottom:.7rem;">Shared with bodybuilding mode — same body, one log</div>';
+    html += '<div class="weight-row">';
+    html += '<input class="weight-input" id="imWeightInput" type="number" inputmode="decimal" step="0.1" placeholder="Weight (lb)" value="'+escAttr(saved)+'">';
+    html += '<button class="save-btn" id="imSaveWeightBtn">Save</button>';
+    html += '</div>';
+    html += '<div class="save-flash" id="imSaveFlash"></div>';
+    html += '</div>';
+    document.getElementById("content").innerHTML = html;
+
+    document.getElementById("imSaveWeightBtn").addEventListener("click", function(){
+      var v = parseFloat(document.getElementById("imWeightInput").value);
+      if(isNaN(v) || v <= 0) return;
+      setWeight(todayStr(), v);
+      var flash = document.getElementById("imSaveFlash");
+      flash.textContent = "Saved to the shared weight log";
+      setTimeout(function(){ if(flash) flash.textContent = ""; }, 1800);
+    });
+  }
+
+  function renderImTraining(){ document.getElementById("content").innerHTML = renderImShell("Training", "This week's swim, bike and run sessions with full prescriptions (Part 5)."); }
+  function renderImLifts(){ document.getElementById("content").innerHTML = renderImShell("Lifts", "The four lift sessions with phase-adjusted sets, anchor highlights and load tracking (Part 5)."); }
+  function renderImDiet(){ document.getElementById("content").innerHTML = renderImShell("Diet", "Day-type meals with macros and shared checkboxes (Part 5)."); }
+  function renderImProgress(){ document.getElementById("content").innerHTML = renderImShell("Progress", "Weight vs target line, weekly adherence history and anchor-lift baseline tracking (Part 5)."); }
+
   /* ===================== TAB CONTROL ===================== */
 
-  var TABS = { today: renderToday, diet: renderDiet, training: renderTraining, progress: renderProgress, log: renderLog };
-  var TAB_ORDER = ["today","diet","training","progress","log"];
+  var TABS_BB = { today: renderToday, diet: renderDiet, training: renderTraining, progress: renderProgress, log: renderLog };
+  var TAB_ORDER_BB = ["today","diet","training","progress","log"];
+  var TABS_IM = { today: renderImToday, training: renderImTraining, lifts: renderImLifts, diet: renderImDiet, progress: renderImProgress };
+  var TAB_ORDER_IM = ["today","training","lifts","diet","progress"];
   var LAST_TAB_KEY = "fittrack.lastTab";
+
+  function curTabs(){ return mode === "ironman" ? TABS_IM : TABS_BB; }
+  function curTabOrder(){ return mode === "ironman" ? TAB_ORDER_IM : TAB_ORDER_BB; }
+  function curLastTabKey(){ return mode === "ironman" ? IM_LAST_TAB_KEY : LAST_TAB_KEY; }
+
+  // Icons/labels for every tab name across both modes (BB set unchanged).
+  var TAB_META = {
+    today: { label:"Today", svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' },
+    diet: { label:"Diet", svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2v8a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V2"/><path d="M9 12v10"/><path d="M17 2c-1.8 1.6-2 3.5-2 6s.5 3 2 4v10"/></svg>' },
+    training: { label:"Training", svg:'<svg viewBox="0 0 24 24" fill="currentColor"><rect x="1" y="9.5" width="3.5" height="5" rx="1"/><rect x="19.5" y="9.5" width="3.5" height="5" rx="1"/><rect x="5.5" y="8" width="2.8" height="8" rx="1"/><rect x="15.7" y="8" width="2.8" height="8" rx="1"/><rect x="8.3" y="11" width="7.4" height="2" rx="0.5"/></svg>' },
+    progress: { label:"Progress", svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 16 8.5 11 1 18"/><polyline points="17 6 23 6 23 12"/></svg>' },
+    log: { label:"Log", svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>' },
+    lifts: { label:"Lifts", svg:'<svg viewBox="0 0 24 24" fill="currentColor"><rect x="1" y="9.5" width="3.5" height="5" rx="1"/><rect x="19.5" y="9.5" width="3.5" height="5" rx="1"/><rect x="5.5" y="8" width="2.8" height="8" rx="1"/><rect x="15.7" y="8" width="2.8" height="8" rx="1"/><rect x="8.3" y="11" width="7.4" height="2" rx="0.5"/></svg>' }
+  };
+  // Ironman "Training" is swim/bike/run, not the barbell — use the cardio mark.
+  var TAB_META_IM = {
+    training: { label:"Training", svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>' }
+  };
+
+  function buildTabbar(){
+    var bar = document.getElementById("tabbar");
+    var html = '';
+    curTabOrder().forEach(function(name){
+      var meta = (mode === "ironman" && TAB_META_IM[name]) || TAB_META[name];
+      html += '<button class="tabbtn" data-tab="'+name+'">'+meta.svg+meta.label+'</button>';
+    });
+    bar.innerHTML = html;
+    bar.querySelectorAll(".tabbtn").forEach(function(btn){
+      btn.addEventListener("click", function(){ switchTab(btn.getAttribute("data-tab")); });
+    });
+  }
 
   function switchTab(name){
     if(!state) return;
-    if(!TABS[name]) name = "today";
+    var tabs = curTabs();
+    if(!tabs[name]) name = "today";
     if(name === "today") todayViewDate = todayStr(); // always open on today
-    lsSet(LAST_TAB_KEY, name);
+    lsSet(curLastTabKey(), name);
     document.querySelectorAll(".tabbtn").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-tab")===name);
     });
     window.scrollTo(0,0);
-    TABS[name]();
+    tabs[name]();
   }
 
-  document.querySelectorAll(".tabbtn").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      switchTab(btn.getAttribute("data-tab"));
+  /* ===================== MODE SWITCHER ===================== */
+
+  function applyModeUI(){
+    document.querySelectorAll(".mode-opt").forEach(function(b){
+      b.classList.toggle("active", b.getAttribute("data-mode") === mode);
     });
+    buildTabbar();
+  }
+
+  function startTabForMode(){
+    var t = lsGet(curLastTabKey());
+    if(curTabOrder().indexOf(t) === -1) t = "today";
+    return t;
+  }
+
+  function setMode(m){
+    if(m !== "bb" && m !== "ironman") m = "bb";
+    if(m === mode || !state) return;
+    // Switching only flips the view. No data is migrated, converted or
+    // deleted — each world keeps its own store.
+    mode = m;
+    lsSet(MODE_KEY, m);
+    applyModeUI();
+    switchTab(startTabForMode());
+  }
+
+  document.querySelectorAll(".mode-opt").forEach(function(b){
+    b.addEventListener("click", function(){ setMode(b.getAttribute("data-mode")); });
   });
+
+  function showChrome(){
+    document.getElementById("modeBar").style.display = "";
+    document.getElementById("tabbar").style.display = "";
+    document.getElementById("app").classList.add("has-modebar");
+    applyModeUI();
+  }
 
   /* ===================== WELCOME (first run) ===================== */
 
   function renderWelcome(){
     document.getElementById("tabbar").style.display = "none";
+    document.getElementById("modeBar").style.display = "none";
+    document.getElementById("app").classList.remove("has-modebar");
     var html = '';
     html += '<div class="welcome">';
     html += '<div class="welcome-icon"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="1" y="9.5" width="3.5" height="5" rx="1"/><rect x="19.5" y="9.5" width="3.5" height="5" rx="1"/><rect x="5.5" y="8" width="2.8" height="8" rx="1"/><rect x="15.7" y="8" width="2.8" height="8" rx="1"/><rect x="8.3" y="11" width="7.4" height="2" rx="0.5"/></svg></div>';
@@ -3368,7 +3506,7 @@
   function startWith(kind){
     state = kind === "blank" ? blankState() : exampleState();
     saveState();
-    document.getElementById("tabbar").style.display = "";
+    showChrome();
     switchTab("today");
   }
 
@@ -3377,14 +3515,16 @@
   window.addEventListener("hashchange", function(){
     if(!state) return;
     var n = ingestHealthHash();
+    // Synced data lives on the bodybuilding Log tab; in Ironman mode
+    // switchTab falls back to Today, which is fine — the import still lands.
     if(n){ switchTab("log"); showToast("Synced " + n + " day" + (n===1?"":"s") + " from Apple Health"); }
   });
 
   if(state){
+    showChrome();
     var imported = ingestHealthHash();
-    var startTab = lsGet(LAST_TAB_KEY);
-    if(TAB_ORDER.indexOf(startTab) === -1) startTab = "today";
-    if(imported) startTab = "log"; // land on the tab that shows the synced data
+    var startTab = startTabForMode();
+    if(imported && mode === "bb") startTab = "log"; // land on the tab that shows the synced data
     switchTab(startTab);
     if(imported) showToast("Synced " + imported + " day" + (imported===1?"":"s") + " from Apple Health");
   } else {
