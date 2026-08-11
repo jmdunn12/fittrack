@@ -1011,6 +1011,15 @@
 
   var STORE_KEY = "fittrack.state.v1";
 
+  // localStorage can throw (Safari private mode, corrupted profiles). A bad
+  // key must degrade to "no data", never white-screen the app.
+  function lsGet(key){
+    try{ return localStorage.getItem(key); }catch(e){ return null; }
+  }
+  function lsSet(key, val){
+    try{ localStorage.setItem(key, val); }catch(e){}
+  }
+
   function clone(x){ return JSON.parse(JSON.stringify(x)); }
 
   function migrateMeals(meals){
@@ -1045,13 +1054,30 @@
 
   function loadState(){
     var s = null;
-    var raw = localStorage.getItem(STORE_KEY);
+    var raw = lsGet(STORE_KEY);
     if(raw){
       try{ s = JSON.parse(raw); }catch(e){ s = null; }
     }
     if(!s) s = {};
     if(!s.daily) s.daily = {};
     if(!s.weights) s.weights = SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; });
+    // One-time dedupe: saving weight is an upsert today, but old versions and
+    // restored backups could hold several entries for one date, which corrupts
+    // rolling averages. Keep the most recently written entry per date.
+    if(s.dedupeV !== 1){
+      var seen = {}, deduped = [];
+      for(var wi = s.weights.length - 1; wi >= 0; wi--){
+        var en = s.weights[wi];
+        if(!en || !en.date || seen[en.date]) continue;
+        seen[en.date] = true;
+        deduped.push(en);
+      }
+      var removed = s.weights.length - deduped.length;
+      if(removed > 0) console.log("Weight log dedupe: removed " + removed + " duplicate entr" + (removed===1?"y":"ies"));
+      deduped.sort(function(a,b){ return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+      s.weights = deduped;
+      s.dedupeV = 1;
+    }
     if(!s.meals) s.meals = clone(DEFAULT_MEALS);
     s.meals = migrateMeals(s.meals);
     // engine v2 = built-in table + Open Food Facts. Re-resolve every auto
@@ -1118,7 +1144,10 @@
 
   // First visit on a device (no saved data): show the welcome chooser
   // instead of silently seeding the example plan.
-  var state = localStorage.getItem(STORE_KEY) ? loadState() : null;
+  var state = lsGet(STORE_KEY) ? loadState() : null;
+  // Persist immediately so load-time migrations (dedupe, engine flags) are
+  // written back even if the user closes the app without touching anything.
+  if(state) saveState();
 
   // Ask the browser to keep this app's data persistent (reduces automatic
   // eviction). Note: this does NOT survive the user deleting the app — that
@@ -1131,7 +1160,7 @@
 
   function exampleState(){
     return {
-      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1, dedupeV:1,
       weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
       meals: clone(DEFAULT_MEALS),
       training: clone(DEFAULT_TRAINING),
@@ -1147,7 +1176,7 @@
       training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
     }
     return {
-      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1, dedupeV:1,
       weights: [],
       meals: meals,
       training: training,
@@ -1156,7 +1185,7 @@
   }
 
   function saveState(){
-    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    lsSet(STORE_KEY, JSON.stringify(state));
   }
 
   function getDay(dateStr){
@@ -2923,7 +2952,7 @@
 
   /* ===================== BACKUP & RESTORE ===================== */
 
-  function backupData(){ return localStorage.getItem(STORE_KEY) || JSON.stringify(state); }
+  function backupData(){ return lsGet(STORE_KEY) || JSON.stringify(state); }
 
   function buildBackupHtml(){
     var html = '<div class="section-title">Backup &amp; Restore</div>';
@@ -2958,7 +2987,7 @@
       backupFlash("That doesn't look like a valid backup."); return;
     }
     if(!window.confirm("Replace ALL current data on this device with this backup? This can't be undone.")) return;
-    localStorage.setItem(STORE_KEY, JSON.stringify(parsed));
+    lsSet(STORE_KEY, JSON.stringify(parsed));
     location.reload();
   }
 
@@ -3302,7 +3331,7 @@
     if(!state) return;
     if(!TABS[name]) name = "today";
     if(name === "today") todayViewDate = todayStr(); // always open on today
-    localStorage.setItem(LAST_TAB_KEY, name);
+    lsSet(LAST_TAB_KEY, name);
     document.querySelectorAll(".tabbtn").forEach(function(btn){
       btn.classList.toggle("active", btn.getAttribute("data-tab")===name);
     });
@@ -3353,7 +3382,7 @@
 
   if(state){
     var imported = ingestHealthHash();
-    var startTab = localStorage.getItem(LAST_TAB_KEY);
+    var startTab = lsGet(LAST_TAB_KEY);
     if(TAB_ORDER.indexOf(startTab) === -1) startTab = "today";
     if(imported) startTab = "log"; // land on the tab that shows the synced data
     switchTab(startTab);
