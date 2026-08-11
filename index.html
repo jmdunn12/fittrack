@@ -2532,14 +2532,18 @@
     var liftTarget = state.training.filter(function(d){ return !d.rest; }).length || 6;
     var cardioTarget = state.cardioGoal || 5;
     var perDay = state.meals.length || 6;
-    var mealTargetWeek = perDay * 7;
     var byWeek = {};
     Object.keys(state.snapshots).forEach(function(date){
       var snap = state.snapshots[date];
       var wk = weekIndexOf(date, state.blockStart);
-      var w = byWeek[wk] || (byWeek[wk] = { week:wk, meals:0, lifts:0, cardios:0, stepFrac:0, days:0, penaltySum:0, cheatDays:0 });
+      var w = byWeek[wk] || (byWeek[wk] = { week:wk, meals:0, lifts:0, cardios:0, stepFrac:0, days:0, penaltySum:0, cheatDays:0, planMeals:0 });
       w.days++;
       w.meals += snap.mealsChecked || 0;
+      // Use the meal count that was frozen into each day's snapshot, so past
+      // weeks keep measuring against the diet that was in effect back then —
+      // changing the plan's meal count later never rewrites old weeks.
+      var mc = (snap.mCount != null) ? snap.mCount : perDay;
+      if(mc > w.planMeals) w.planMeals = mc;
       if(snap.trainingDone) w.lifts++;          // true only when lifted & not a rest day
       if(snap.cardioDone) w.cardios++;
       if(snap.stepsPct != null) w.stepFrac += clamp(snap.stepsPct/100, 0, 1);
@@ -2549,6 +2553,7 @@
     var curWk = currentWeek();
     return Object.keys(byWeek).map(Number).sort(function(a,b){ return b-a; }).map(function(wk){
       var w = byWeek[wk];
+      var mealTargetWeek = (w.planMeals || perDay) * 7;
       var trainingPct = liftTarget ? Math.min(100, Math.round(w.lifts/liftTarget*100)) : 0;
       var cardioPct = cardioTarget ? Math.min(100, Math.round(w.cardios/cardioTarget*100)) : 0;
       var dietPct = mealTargetWeek ? Math.min(100, Math.round(w.meals/mealTargetWeek*100)) : 0;
