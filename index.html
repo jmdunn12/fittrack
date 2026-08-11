@@ -1170,6 +1170,297 @@
   // Which world the app is showing. Persisted; defaults to bodybuilding.
   var mode = lsGet(MODE_KEY) === "ironman" ? "ironman" : "bb";
 
+  /* ===================== IRONMAN MODE: PLAN DATA ===================== */
+  /* 31-week build to race day, Sunday 2027-03-14. Week 1 is a 6-day week
+     starting Tuesday 2026-08-11; every later week starts Monday. Week N runs
+     from IM_WEEK_STARTS[N-1] through the day before IM_WEEK_STARTS[N];
+     week 31 ends on race day. */
+
+  var IM_WEEK_STARTS = [
+    '2026-08-11','2026-08-17','2026-08-24','2026-08-31','2026-09-07','2026-09-14',
+    '2026-09-21','2026-09-28','2026-10-05','2026-10-12','2026-10-19','2026-10-26',
+    '2026-11-02','2026-11-09','2026-11-16','2026-11-23','2026-11-30','2026-12-07',
+    '2026-12-14','2026-12-21','2026-12-28','2027-01-04','2027-01-11','2027-01-18',
+    '2027-01-25','2027-02-01','2027-02-08','2027-02-15','2027-02-22','2027-03-01',
+    '2027-03-08'
+  ];
+  var IM_RECOVERY_WEEKS = [4,8,12,16,20,24,28];
+
+  // [week, endurance hrs, long bike, long run]
+  var IM_WEEK_VOLUME = [
+    [1,5.0,'1:15','35 min'],[2,5.5,'1:30','40 min'],[3,6.0,'1:40','45 min'],
+    [4,4.0,'1:00','30 min'],[5,6.5,'1:50','50 min'],[6,7.0,'2:00','55 min'],
+    [7,7.5,'2:15','60 min'],[8,4.5,'1:15','35 min'],[9,7.5,'2:30','65 min'],
+    [10,8.0,'2:40','70 min'],[11,8.0,'2:45','70 min'],[12,5.0,'1:30','40 min'],
+    [13,8.0,'2:30','65 min'],[14,8.5,'2:45','70 min'],[15,9.0,'2:50','75 min'],
+    [16,5.5,'1:30','45 min'],[17,9.0,'2:50','80 min'],[18,9.0,'3:00','80 min'],
+    [19,9.5,'3:00','85 min'],[20,6.0,'1:45','50 min'],[21,9.5,'2:50','80 min'],
+    [22,9.5,'3:00','85 min'],[23,10.0,'3:00','90 min'],[24,6.5,'1:45','50 min'],
+    [25,10.0,'3:00','90 min'],[26,10.0,'3:00','85 min'],
+    [27,9.0,'RACE SIM: 2,000m + 2:45 bike + 40 min run','—'],
+    [28,7.0,'2:00','55 min'],[29,6.0,'2:00','60 min'],[30,4.5,'1:30','45 min'],
+    [31,2.5,'45 min','25 min']
+  ];
+
+  // Endurance sessions per phase, keyed by JS weekday (0=Sun..6=Sat).
+  // Lifts are separate (imLiftDaysFor) because taper weeks change them.
+  var IM_TEMPLATE = {
+    A: {
+      1:[{cat:'swim', desc:'Technique session'}],
+      2:[{cat:'run',  desc:'Easy Z2 30-45 min + 6 x 20s strides'}],
+      3:[{cat:'bike', desc:'Z2 with cadence work 85-95 rpm, 70-90 min'}],
+      4:[{cat:'swim', desc:'Endurance session'}],
+      5:[{cat:'swim', desc:'Easy 800-1,000m, technique only', optional:true}],
+      6:[{cat:'bike', desc:'LONG BIKE (easy Z2)', long:true},{cat:'run', desc:'Brick run 10-15 min easy'}],
+      0:[{cat:'run',  desc:'LONG RUN - all easy Z2', long:true}]
+    },
+    B: {
+      1:[{cat:'swim', desc:'CSS intervals'}],
+      2:[{cat:'run',  desc:'15 min WU, 5 x 4 min hard / 2 min jog, 10 min CD'}],
+      3:[{cat:'bike', desc:'20 min WU, 3 x 12 min threshold / 5 min easy, 15 min CD'}],
+      4:[{cat:'swim', desc:'Endurance + open-water skills'}],
+      5:[{cat:'swim', desc:'Easy 800-1,000m, technique only', optional:true}],
+      6:[{cat:'bike', desc:'LONG BIKE with 3 x 15 min at race effort', long:true},{cat:'run', desc:'Brick run 20 min'}],
+      0:[{cat:'run',  desc:'LONG RUN - last 15 min at tempo', long:true}]
+    },
+    C: {
+      1:[{cat:'swim', desc:'Race-pace sets'}],
+      2:[{cat:'run',  desc:'15 min WU, 3 x 8 min race effort / 3 min jog, 10 min CD'}],
+      3:[{cat:'bike', desc:'20 min WU, 2 x 20 min at 90% FTP / 8 min easy, CD'}],
+      4:[{cat:'swim', desc:'2,000m race simulation'}],
+      5:[{cat:'swim', desc:'Easy 800-1,000m, technique only', optional:true}],
+      6:[{cat:'bike', desc:'LONG BIKE at race effort', long:true},{cat:'run', desc:'Brick run 25-35 min at race pace'}],
+      0:[{cat:'run',  desc:'LONG RUN - negative split', long:true}]
+    },
+    TAPER: {
+      1:[{cat:'swim', desc:'Short technique session + a few race-pace 50s'}],
+      2:[{cat:'run',  desc:'Easy Z2 with 4 x 20s strides'}],
+      3:[{cat:'bike', desc:'Easy Z2 spin'}],
+      4:[{cat:'swim', desc:'Easy endurance, open-water focus'}],
+      5:[{cat:'swim', desc:'Easy 800m, technique only', optional:true}],
+      6:[{cat:'bike', desc:'LONG BIKE (reduced, easy)', long:true},{cat:'run', desc:'Brick run 10-15 min easy'}],
+      0:[{cat:'run',  desc:'LONG RUN (reduced, easy)', long:true}]
+    }
+  };
+
+  // [weekRange, Monday main set, Thursday main set] — weeks 1-28.
+  // Taper swims (29-31) follow the taper template, no prescribed main sets.
+  var IM_SWIM_SETS = [
+    ['1-3','10 x 100m at CSS+5s, 20s rest','6 x 150m at CSS+3s, 25s rest'],
+    ['4','8 x 75m easy, 20s rest','800m continuous, easy'],
+    ['5-7','8 x 150m at CSS+3s, 20s rest','5 x 200m at CSS, 30s rest'],
+    ['8','8 x 75m easy, 20s rest','1,000m continuous, easy'],
+    ['9-11','5 x 300m at CSS+2s, 30s rest','Wk 9: 1,200m straight. Wk 10: 1,500m. Wk 11: 2,000m straight'],
+    ['12','6 x 100m easy, 20s rest','1,000m continuous, easy. Retest CSS'],
+    ['13-15','4 x 400m at CSS, 30s rest','1,000m continuous, then 4 x 200m at CSS, 20s rest'],
+    ['16','8 x 100m easy, 20s rest','1,000m continuous, easy'],
+    ['17-19','3 x 500m at CSS, 40s rest','1,200m continuous, then 6 x 100m at CSS-2s, 15s rest'],
+    ['20','8 x 100m easy, 20s rest','1,200m continuous, easy'],
+    ['21-23','8 x 100m at race effort, 10s rest, then 4 x 50m fast','2,000m continuous, timed'],
+    ['24','8 x 100m easy, 20s rest','1,200m continuous, easy. Retest CSS in Wk 22'],
+    ['25-26','10 x 100m at race effort, 10s rest','2,000m continuous, timed'],
+    ['27','6 x 100m at race effort, 10s rest','RACE SIM: 2,000m straight, then onto the bike'],
+    ['28','8 x 100m easy, 20s rest','1,500m continuous, easy']
+  ];
+  var IM_SWIM_FRAME = '300-400m warm-up, 6 x 50m drills, main set, 200m cool-down';
+  var IM_SWIM_DRILLS = ['Catch-up','Fingertip drag','6-3-6','Single-arm','Sculling','Zipper'];
+
+  // Four lift sessions, all 31 weeks. In Phase C and later, accessories drop
+  // to 2 sets; the three ANCHOR lifts stay at 4 x 5 and full load.
+  // [exercise, sets x reps, anchor]
+  var IM_LIFTS = {
+    lowerA: { name:'Lower A (heavy)', day:1, ex:[
+      ['Back squat','4x5',true],['Romanian deadlift','3x6'],['Bulgarian split squat','3x8 ea'],
+      ['Standing calf raise','3x10'],['Pallof press','3x12 ea']
+    ]},
+    upperA: { name:'Upper A (heavy)', day:2, ex:[
+      ['Weighted pull-up','4x5',true],['Incline barbell press','4x5',true],
+      ['Chest-supported row','3x6'],['Overhead press','3x6'],['Face pull','3x15']
+    ]},
+    lowerB: { name:'Lower B (moderate)', day:4, ex:[
+      ['Trap bar deadlift','3x6'],['Leg press','3x8'],['Leg curl','3x10'],
+      ['Walking lunge','2x10 ea'],['Seated calf raise','3x12'],['Hanging leg raise','3x12']
+    ]},
+    upperB: { name:'Upper B (moderate)', day:5, ex:[
+      ['Flat DB press','3x8'],['Lat pulldown','3x8'],['Single-arm DB row','3x10 ea'],
+      ['Lateral raise','3x12'],['DB curl','3x10'],['Overhead triceps extension','3x10']
+    ]}
+  };
+  var IM_LIFT_ORDER = ['lowerA','upperA','lowerB','upperB'];
+
+  // Diet day types: 'standard' Mon-Fri, 'long' Sat-Sun, 'recovery' all 7 days
+  // of a recovery week (overrides the others). Taper weeks use the Phase C
+  // tables. Each meal: [name, foods, P, C, F]; kcal is always computed from
+  // the summed raw macros (P*4 + C*4 + F*9) — never per-meal-rounded-then-summed.
+  var IM_DIET = {
+    A_standard: [
+      ['1 Breakfast','200g egg whites, 90g whole eggs, 45g dry oats, 100g blueberries, 14g peanut butter',43,50,19],
+      ['2 Lunch','200g chicken, 150g cooked rice, 150g cucumber, 5g olive oil',51,47,9],
+      ['3 Pre-lift','1 scoop whey, 1 banana (120g)',26,30,1],
+      ['4 Post-lift','1 scoop whey, 120g cooked rice',28,37,1],
+      ['5 Dinner','180g 96/4 beef, 200g sweet potato, 150g Brussels sprouts, 6g olive oil',46,55,14],
+      ['6 Before bed','250g Greek yogurt, 18g almonds, 100g strawberries',29,21,10]
+    ],
+    A_long: [
+      ['1 Breakfast','200g egg whites, 90g whole eggs, 65g dry oats, 100g blueberries, 14g PB, 15g honey',46,76,21],
+      ['2 Intra-session','65g sports drink mix through the session + 1 banana',1,86,0],
+      ['3 Post-session','1 scoop whey, 170g cooked rice, 160g chicken',66,51,4],
+      ['4 Lunch','160g chicken, 200g sweet potato, 150g Brussels, 5g olive oil',45,55,8],
+      ['5 Snack','200g Greek yogurt, 100g strawberries',21,15,1],
+      ['6 Dinner','180g beef, 150g cooked rice, 150g cucumber, 6g olive oil',44,47,14],
+      ['7 Before bed','250g Greek yogurt, 18g almonds, 80g blueberries',29,24,10]
+    ],
+    B_standard: [
+      ['1 Breakfast','200g egg whites, 100g whole eggs, 60g dry oats, 100g blueberries, 16g PB',47,61,22],
+      ['2 Lunch','200g chicken, 180g cooked rice, 150g cucumber, 6g olive oil',52,56,10],
+      ['3 Pre-lift','1 scoop whey, 1 banana, 25g dry oats',30,47,3],
+      ['4 Post-lift','1 scoop whey, 150g cooked rice',29,45,1],
+      ['5 Dinner','180g beef, 260g sweet potato, 150g Brussels, 7g olive oil',48,67,15],
+      ['6 Before bed','250g Greek yogurt, 22g almonds, 100g strawberries',30,21,12]
+    ],
+    B_long: [
+      ['1 Breakfast','200g egg whites, 100g whole eggs, 80g dry oats, 100g blueberries, 16g PB, 20g honey',50,91,24],
+      ['2 Intra-session','100g sports drink mix + 1 banana',1,117,0],
+      ['3 Post-session','1 scoop whey, 230g cooked rice, 160g chicken',68,67,4],
+      ['4 Lunch','160g chicken, 260g sweet potato, 150g Brussels, 5g olive oil',46,67,8],
+      ['5 Snack','200g Greek yogurt, 100g strawberries, 25g dry oats',24,32,2],
+      ['6 Dinner','180g beef, 180g cooked rice, 150g cucumber, 7g olive oil',44,56,15],
+      ['7 Before bed','250g Greek yogurt, 20g almonds, 80g blueberries',30,25,11]
+    ],
+    C_standard: [
+      ['1 Breakfast','200g egg whites, 100g whole eggs, 75g dry oats, 100g blueberries, 20g PB',50,72,25],
+      ['2 Lunch','200g chicken, 220g cooked rice, 150g cucumber, 7g olive oil',53,67,11],
+      ['3 Pre-lift','1 scoop whey, 1 banana, 35g dry oats',31,54,4],
+      ['4 Post-lift','1 scoop whey, 190g cooked rice',30,56,2],
+      ['5 Dinner','180g beef, 300g sweet potato, 150g Brussels, 8g olive oil',48,75,16],
+      ['6 Before bed','250g Greek yogurt, 28g almonds, 100g strawberries',32,23,15]
+    ],
+    C_long: [
+      ['1 Breakfast','180g egg whites, 100g whole eggs, 95g dry oats, 100g blueberries, 18g PB, 20g honey',50,101,26],
+      ['2 Intra-session','155g sports drink mix + 1 banana',1,167,0],
+      ['3 Post-session','1 scoop whey, 280g cooked rice, 160g chicken',69,81,4],
+      ['4 Lunch','170g chicken, 280g sweet potato, 150g Brussels, 6g olive oil',49,71,10],
+      ['5 Snack','200g Greek yogurt, 100g strawberries, 35g dry oats',25,39,3],
+      ['6 Dinner','180g beef, 200g cooked rice, 150g cucumber, 8g olive oil',45,61,16],
+      ['7 Before bed','250g Greek yogurt, 25g almonds, 80g blueberries',31,26,13]
+    ],
+    recovery: [
+      ['1 Breakfast','200g egg whites, 100g whole eggs, 70g dry oats, 100g blueberries, 20g PB',50,68,25],
+      ['2 Lunch','200g chicken, 200g cooked rice, 150g cucumber, 7g olive oil',52,61,11],
+      ['3 Pre-lift','1 scoop whey, 1 banana, 25g dry oats',30,47,3],
+      ['4 Post-lift','1 scoop whey, 170g cooked rice',30,51,2],
+      ['5 Dinner','180g beef, 280g sweet potato, 150g Brussels, 8g olive oil',48,71,16],
+      ['6 Before bed','250g Greek yogurt, 28g almonds, 100g strawberries',32,23,15]
+    ]
+  };
+
+  // Target bodyweight (lb) per week, 1..31.
+  var IM_WEIGHT_TARGETS = [
+    192.0,191.0,190.0,190.0,189.0,188.0,187.0,187.0,186.0,185.0,184.0,184.0,
+    183.3,182.6,181.9,181.9,181.2,180.5,179.8,179.8,179.3,178.8,178.3,178.3,
+    178.3,178.3,178.3,178.3,178.3,178.3,178.3
+  ];
+
+  /* ---------- plan resolvers ---------- */
+
+  // Week number (1-31) for a date, or null outside the plan window.
+  function imWeekOf(dateStr){
+    if(!dateStr || dateStr < IM_WEEK_STARTS[0] || dateStr > IM_RACE_DAY) return null;
+    for(var i = IM_WEEK_STARTS.length - 1; i >= 0; i--){
+      if(dateStr >= IM_WEEK_STARTS[i]) return i + 1;
+    }
+    return null;
+  }
+  function imPhaseOf(week){
+    if(!week) return null;
+    return week <= 12 ? 'A' : (week <= 20 ? 'B' : (week <= 28 ? 'C' : 'TAPER'));
+  }
+  function imIsRecovery(week){ return IM_RECOVERY_WEEKS.indexOf(week) !== -1; }
+  function imWeekdayOf(dateStr){ return new Date(dateStr + 'T00:00:00').getDay(); } // 0=Sun..6=Sat
+  function imDayTypeOf(dateStr){
+    var wk = imWeekOf(dateStr);
+    if(!wk) return null;
+    if(imIsRecovery(wk)) return 'recovery';
+    var wd = imWeekdayOf(dateStr);
+    return (wd === 0 || wd === 6) ? 'long' : 'standard';
+  }
+  function imVolumeOf(week){ return week ? IM_WEEK_VOLUME[week-1] : null; }
+  function imWeightTargetOf(week){ return week ? IM_WEIGHT_TARGETS[week-1] : null; }
+  function imWeekRange(week){
+    var start = IM_WEEK_STARTS[week-1];
+    var end = week < 31 ? shiftISO(IM_WEEK_STARTS[week], -1) : IM_RACE_DAY;
+    return { start:start, end:end };
+  }
+
+  // Swim main sets for a week (weeks 1-28; taper has none prescribed).
+  function imSwimSetsOf(week){
+    if(!week) return null;
+    for(var i=0;i<IM_SWIM_SETS.length;i++){
+      var r = IM_SWIM_SETS[i][0].split('-');
+      var lo = parseInt(r[0],10), hi = r.length > 1 ? parseInt(r[1],10) : lo;
+      if(week >= lo && week <= hi) return { mon: IM_SWIM_SETS[i][1], thu: IM_SWIM_SETS[i][2] };
+    }
+    return null;
+  }
+
+  // Endurance sessions prescribed for a date (template by phase + weekday).
+  // Race day itself is a race, not a training day.
+  function imEnduranceFor(dateStr){
+    var wk = imWeekOf(dateStr);
+    if(!wk) return [];
+    if(dateStr === IM_RACE_DAY) return [];
+    var tpl = IM_TEMPLATE[imPhaseOf(wk)] || {};
+    return (tpl[imWeekdayOf(dateStr)] || []).slice();
+  }
+
+  // Lift sessions for a week, keyed by JS weekday. Taper: wk 29 all four at
+  // 2 sets, wk 30 one light full-body session, wk 31 (race week) none.
+  function imLiftDaysFor(week){
+    if(!week || week === 31) return {};
+    if(week === 30) return { 1: { key:'fullbody', name:'Light full-body (one session, easy)' } };
+    var out = {};
+    IM_LIFT_ORDER.forEach(function(k){
+      var s = IM_LIFTS[k];
+      out[s.day] = { key:k, name: s.name + (week === 29 ? ' — all lifts 2 sets' : '') };
+    });
+    return out;
+  }
+
+  // Display sets for an exercise: Phase C and later, accessories drop to 2
+  // sets; anchors keep 4x5 at full load.
+  function imLiftSetsFor(exArr, week){
+    var anchor = !!exArr[2];
+    if(anchor) return exArr[1];
+    var phase = imPhaseOf(week);
+    if(phase === 'C' || phase === 'TAPER'){
+      return '2x' + exArr[1].split('x')[1];
+    }
+    return exArr[1];
+  }
+
+  // Meals table for a date: recovery overrides; taper eats Phase C; weekend
+  // (long-session days) get the long table.
+  function imDietFor(dateStr){
+    var wk = imWeekOf(dateStr);
+    if(!wk) return null;
+    if(imIsRecovery(wk)) return { label:'Recovery day', meals: IM_DIET.recovery };
+    var phase = imPhaseOf(wk);
+    if(phase === 'TAPER') phase = 'C';
+    var wd = imWeekdayOf(dateStr);
+    var isLong = (wd === 0 || wd === 6);
+    return {
+      label: (isLong ? 'Long-session day' : 'Standard day') + ' · Phase ' + phase,
+      meals: IM_DIET[phase + (isLong ? '_long' : '_standard')]
+    };
+  }
+  function imMealKcal(m){ return (m[2] + m[3]) * 4 + m[4] * 9; }
+  function imDietTotals(meals){
+    var t = {p:0, c:0, f:0};
+    meals.forEach(function(m){ t.p += m[2]; t.c += m[3]; t.f += m[4]; });
+    t.kcal = (t.p + t.c) * 4 + t.f * 9;
+    return t;
+  }
+
   // Ask the browser to keep this app's data persistent (reduces automatic
   // eviction). Note: this does NOT survive the user deleting the app — that
   // is why the Backup & Restore tools on the Log tab exist.
@@ -3357,11 +3648,34 @@
   }
 
   function renderImToday(){
-    var days = Math.round((new Date(IM_RACE_DAY+"T00:00:00") - new Date(todayStr()+"T00:00:00"))/(24*3600*1000));
+    var ds = todayStr();
+    var days = Math.round((new Date(IM_RACE_DAY+"T00:00:00") - new Date(ds+"T00:00:00"))/(24*3600*1000));
+    var wk = imWeekOf(ds);
     var html = '<div class="page-title">Today</div>';
-    html += '<div class="page-sub">Ironman mode &middot; '+fmtFullDate(todayStr())+'</div>';
-    html += '<div class="card"><div class="card-title">'+(days>=0 ? days+' days to race day' : 'Race day has passed')+'</div>';
-    html += '<div class="card-sub">'+fmtFullDate(IM_RACE_DAY)+'. The daily checklist, week/phase resolver and adherence scoring arrive with the plan engine (Parts 3-4).</div></div>';
+    html += '<div class="page-sub">Ironman mode &middot; '+fmtFullDate(ds)+'</div>';
+
+    if(ds === IM_RACE_DAY){
+      html += '<div class="card" style="border-color:var(--carbs);"><div class="card-title" style="color:var(--carbs);">RACE DAY</div>';
+      html += '<div class="card-sub">This is what the 31 weeks were for. Nothing to check off — go race.</div></div>';
+    } else if(!wk){
+      html += '<div class="card"><div class="card-title">Outside the plan window</div>';
+      html += '<div class="card-sub">The 31-week block runs '+fmtDate(IM_WEEK_STARTS[0])+', 2026 &ndash; race day '+fmtFullDate(IM_RACE_DAY)+', 2027. '+(days>0 ? days+' days until race day.' : 'The race has passed.')+'</div></div>';
+    } else {
+      var phase = imPhaseOf(wk), vol = imVolumeOf(wk), dt = imDayTypeOf(ds);
+      var target = imWeightTargetOf(wk);
+      html += '<div class="card">';
+      html += '<div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline;"><span>Week '+wk+' of 31 &middot; '+(phase==='TAPER'?'Taper':'Phase '+phase)+'</span><span class="card-sub" style="margin:0;">'+days+' days to race</span></div>';
+      html += '<div class="card-sub" style="margin-top:.4rem;">'+
+        (dt==='recovery' ? 'Recovery day type' : (dt==='long' ? 'Long-session day' : 'Standard day'))+
+        ' &middot; target weight <b style="color:var(--text);">'+target+' lb</b>'+
+        ' &middot; '+vol[1]+' endurance hrs this week &middot; long bike '+esc(vol[2])+(vol[3] !== '—' ? ' &middot; long run '+esc(vol[3]) : '')+'</div>';
+      html += '</div>';
+      if(imIsRecovery(wk)){
+        html += '<div class="card" style="border-color:#3A2A1C;"><div class="card-title" style="color:var(--fat);">Recovery week</div>';
+        html += '<div class="card-sub">Volume down 40%, eating at maintenance. Weight holding or rising 1-2 lbs is expected.</div></div>';
+      }
+      html += '<div class="card"><div class="card-title">Coming next</div><div class="card-sub">The daily checklist and adherence scoring arrive with Part 4.</div></div>';
+    }
 
     // Bodyweight — the one store shared with bodybuilding mode.
     var ds = todayStr(), saved = "";
