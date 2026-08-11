@@ -65,6 +65,22 @@
   .mode-opt.active[data-mode="bb"]{background:var(--accent);color:#062019;}
   .mode-opt.active[data-mode="ironman"]{background:var(--carbs);color:#061426;}
   .mode-opt:not(.active):active{background:rgba(255,255,255,0.04);}
+
+  /* ---- Ironman checklist ---- */
+  .im-cat-chip{font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.18rem .42rem;border-radius:6px;text-transform:uppercase;flex-shrink:0;}
+  .im-cat-chip.swim{color:var(--carbs);background:#4D9FFF22;}
+  .im-cat-chip.bike{color:var(--fat);background:#FFD16622;}
+  .im-cat-chip.run{color:var(--protein);background:#FF6B6B22;}
+  .im-opt-tag{font-size:.6rem;font-weight:700;color:var(--text-faint);flex-shrink:0;}
+  .im-subs{margin:-.15rem 0 .6rem 1.4rem;}
+  .im-sub{display:flex;align-items:center;gap:.55rem;background:#0D0F17;border:1px solid var(--border);border-radius:10px;padding:.6rem .7rem;margin-bottom:.4rem;}
+  .im-sub .sc{width:19px;height:19px;border-radius:50%;border:2px solid var(--text-faint);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:border-color .15s, background .15s;}
+  .im-sub .sc svg{width:11px;height:11px;opacity:0;}
+  .im-sub.checked .sc{border-color:var(--accent);background:var(--accent);}
+  .im-sub.checked .sc svg{opacity:1;}
+  .im-sub-label{flex:1;min-width:0;font-size:.82rem;font-weight:600;}
+  .im-sub-sets{font-size:.72rem;color:var(--text-dim);font-weight:700;flex-shrink:0;}
+  .im-anchor-tag{font-size:.56rem;font-weight:800;color:var(--fat);background:#FFD16622;padding:.12rem .35rem;border-radius:5px;letter-spacing:.05em;flex-shrink:0;}
   h1,h2,h3,p{margin:0;}
   .page-title{font-size:1.5rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:.25rem;}
   .today-select{
@@ -1460,6 +1476,106 @@
     t.kcal = (t.p + t.c) * 4 + t.f * 9;
     return t;
   }
+
+  /* ---------- adherence engine ---------- */
+
+  var IM_CATS = ['diet','lifting','training'];
+
+  // The prescribed checklist for a date, grouped by category. Item keys are
+  // deterministic per date so checks persist across renders and re-visits.
+  // Optional sessions (the Friday technique swim) appear in the list but are
+  // excluded from scoring in BOTH directions — skipping one never costs
+  // points, doing one never earns them. Race day and out-of-window dates
+  // have no checklist.
+  function imDayPlan(dateStr){
+    var wk = imWeekOf(dateStr);
+    if(!wk || dateStr === IM_RACE_DAY) return null;
+    var wd = imWeekdayOf(dateStr);
+    var diet = imDietFor(dateStr);
+    var items = { diet:[], lifting:[], training:[] };
+    diet.meals.forEach(function(m, i){
+      items.diet.push({ key:'d'+i, label:m[0], sub:imMealKcal(m)+' kcal &middot; P'+m[2]+' C'+m[3]+' F'+m[4] });
+    });
+    var lift = imLiftDaysFor(wk)[wd];
+    if(lift){
+      var subs = [];
+      if(IM_LIFTS[lift.key]){
+        IM_LIFTS[lift.key].ex.forEach(function(ex, i){
+          subs.push({ key:'lx_'+lift.key+'_'+i, label:ex[0], sets:imLiftSetsFor(ex, wk), anchor:!!ex[2] });
+        });
+      }
+      items.lifting.push({ key:'l_'+lift.key, label:lift.name, subs:subs });
+    }
+    imEnduranceFor(dateStr).forEach(function(s, i){
+      items.training.push({ key:'t'+i+'_'+s.cat, label:s.desc, cat:s.cat, optional:!!s.optional, long:!!s.long });
+    });
+    return { week:wk, date:dateStr, items:items };
+  }
+
+  // Daily score. Raw fractions throughout — rounding happens only at display.
+  // - Category % = checked / prescribed, that category only.
+  // - A category with ZERO prescribed items that day is EXCLUDED (null),
+  //   never scored 0% (Wednesday has no lift; 0% would poison the metric).
+  // - Daily overall = mean of the categories that ARE prescribed.
+  function imDayScore(dateStr){
+    var plan = imDayPlan(dateStr);
+    if(!plan) return null;
+    var checks = imState.checks[dateStr] || {};
+    var cats = { diet:null, lifting:null, training:null };
+    var counts = {};
+    IM_CATS.forEach(function(cat){
+      var scored = plan.items[cat].filter(function(it){ return !it.optional; });
+      var done = 0;
+      scored.forEach(function(it){ if(checks[it.key]) done++; });
+      counts[cat] = { done:done, of:scored.length };
+      if(scored.length) cats[cat] = done / scored.length;
+    });
+    var present = IM_CATS.filter(function(c){ return cats[c] != null; });
+    var overall = present.length ? present.reduce(function(s,c){ return s + cats[c]; }, 0) / present.length : null;
+    return { cats:cats, counts:counts, overall:overall, plan:plan };
+  }
+
+  // Weekly rollup. Per category: total checked / total prescribed across the
+  // week's days, only up to and including today — future days are never
+  // counted as missed. Weekly overall = the MEAN of the three category
+  // percentages, never raw item counts: a week holds ~40 meals, ~4 lifts and
+  // ~9 endurance sessions, so raw counting would let diet drown everything
+  // and make a skipped 3-hour ride nearly invisible.
+  function imWeekScore(week){
+    var range = imWeekRange(week);
+    var today = todayStr();
+    var sums = { diet:{done:0,of:0}, lifting:{done:0,of:0}, training:{done:0,of:0} };
+    var d = range.start, counted = 0;
+    while(d <= range.end && d <= today){
+      var sc = imDayScore(d);
+      if(sc){
+        IM_CATS.forEach(function(cat){
+          sums[cat].done += sc.counts[cat].done;
+          sums[cat].of += sc.counts[cat].of;
+        });
+        counted++;
+      }
+      d = shiftISO(d, 1);
+    }
+    var cats = { diet:null, lifting:null, training:null };
+    IM_CATS.forEach(function(cat){ if(sums[cat].of > 0) cats[cat] = sums[cat].done / sums[cat].of; });
+    var present = IM_CATS.filter(function(c){ return cats[c] != null; });
+    var overall = present.length ? present.reduce(function(s,c){ return s + cats[c]; }, 0) / present.length : null;
+    return { week:week, cats:cats, sums:sums, overall:overall, daysCounted:counted };
+  }
+
+  function imToggle(dateStr, key){
+    var c = imState.checks[dateStr];
+    if(!c){ c = {}; imState.checks[dateStr] = c; }
+    if(c[key]) delete c[key]; else c[key] = true;
+    if(Object.keys(c).length === 0) delete imState.checks[dateStr];
+    imSave();
+  }
+  function imPct(frac){ return frac == null ? null : Math.round(frac * 100); }
+
+  // Read-only hook so automated tests can exercise the scoring engine
+  // directly; the app itself never uses it.
+  window.__imDebug = { dayPlan: imDayPlan, dayScore: imDayScore, weekScore: imWeekScore };
 
   // Ask the browser to keep this app's data persistent (reduces automatic
   // eviction). Note: this does NOT survive the user deleting the app — that
@@ -3674,7 +3790,51 @@
         html += '<div class="card" style="border-color:#3A2A1C;"><div class="card-title" style="color:var(--fat);">Recovery week</div>';
         html += '<div class="card-sub">Volume down 40%, eating at maintenance. Weight holding or rising 1-2 lbs is expected.</div></div>';
       }
-      html += '<div class="card"><div class="card-title">Coming next</div><div class="card-sub">The daily checklist and adherence scoring arrive with Part 4.</div></div>';
+
+      // ----- adherence score + checklist -----
+      var score = imDayScore(ds);
+      var checks = imState.checks[ds] || {};
+      var oPct = imPct(score.overall);
+      html += '<div class="card plan-card '+adherenceClass(oPct == null ? 0 : oPct)+'">';
+      html += '<div class="plan-head"><span class="plan-label">Plan followed today</span><span class="plan-pct">'+(oPct == null ? '&mdash;' : oPct+'%')+'</span></div>';
+      html += '<div class="plan-track"><span class="plan-fill" style="width:'+(oPct||0)+'%"></span></div>';
+      html += '<div class="plan-breakdown">';
+      IM_CATS.forEach(function(cat){
+        var label = cat.charAt(0).toUpperCase() + cat.slice(1);
+        var p = imPct(score.cats[cat]);
+        if(p == null) html += '<span class="plan-chip rest">'+label+' &mdash; none today</span>';
+        else html += '<span class="plan-chip'+(p >= 100 ? ' done' : '')+'">'+label+' '+p+'% ('+score.counts[cat].done+'/'+score.counts[cat].of+')</span>';
+      });
+      html += '</div></div>';
+
+      var CAT_TITLES = { diet:'Diet', lifting:'Lifting', training:'Training' };
+      IM_CATS.forEach(function(cat){
+        var list = score.plan.items[cat];
+        if(!list.length) return;
+        html += '<div class="section-title">'+CAT_TITLES[cat]+'</div>';
+        list.forEach(function(it){
+          var checked = !!checks[it.key];
+          html += '<div class="meal-item'+(checked?' checked':'')+'" data-imkey="'+it.key+'">';
+          html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+          html += '<div class="meal-info"><div class="meal-name">'+esc(it.label)+'</div>'+(it.sub ? '<div class="meal-name-sub">'+it.sub+'</div>' : '')+'</div>';
+          if(it.cat) html += '<span class="im-cat-chip '+it.cat+'">'+it.cat+'</span>';
+          if(it.optional) html += '<span class="im-opt-tag">optional</span>';
+          html += '</div>';
+          if(it.subs && it.subs.length){
+            html += '<div class="im-subs">';
+            it.subs.forEach(function(sx){
+              var sChecked = !!checks[sx.key];
+              html += '<div class="im-sub'+(sChecked?' checked':'')+'" data-imkey="'+sx.key+'">';
+              html += '<div class="sc"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+              html += '<span class="im-sub-label">'+esc(sx.label)+'</span>';
+              if(sx.anchor) html += '<span class="im-anchor-tag">ANCHOR</span>';
+              html += '<span class="im-sub-sets">'+esc(sx.sets)+'</span>';
+              html += '</div>';
+            });
+            html += '</div>';
+          }
+        });
+      });
     }
 
     // Bodyweight — the one store shared with bodybuilding mode.
@@ -3698,6 +3858,13 @@
       var flash = document.getElementById("imSaveFlash");
       flash.textContent = "Saved to the shared weight log";
       setTimeout(function(){ if(flash) flash.textContent = ""; }, 1800);
+    });
+    document.querySelectorAll("[data-imkey]").forEach(function(el){
+      el.addEventListener("click", function(ev){
+        ev.stopPropagation(); // sub-item taps must not toggle the parent card
+        imToggle(ds, el.getAttribute("data-imkey"));
+        renderImToday();
+      });
     });
   }
 
