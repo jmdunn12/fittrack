@@ -1184,6 +1184,13 @@
     if(!s || typeof s !== "object" || Array.isArray(s)) s = {};
     if(!s.checks || typeof s.checks !== "object") s.checks = {};       // per-date {itemKey:true}
     if(!s.liftLoads || typeof s.liftLoads !== "object") s.liftLoads = {}; // per-exercise load history
+    // User edits to the plan live here (diet / lifts / template), cloned
+    // from the built-in defaults on first edit. Empty = stock plan.
+    if(!s.plan || typeof s.plan !== "object" || Array.isArray(s.plan)) s.plan = {};
+    // Frozen per-day prescribed/checked counts, written whenever a day's
+    // checks change — so editing the plan later never rewrites the adherence
+    // history of days already logged.
+    if(!s.daySnaps || typeof s.daySnaps !== "object") s.daySnaps = {};
     return s;
   }
   var imState = imLoadState();
@@ -1197,6 +1204,8 @@
      starting Tuesday 2026-08-11; every later week starts Monday. Week N runs
      from IM_WEEK_STARTS[N-1] through the day before IM_WEEK_STARTS[N];
      week 31 ends on race day. */
+
+  var IM_RACE_DAY = "2027-03-14";
 
   var IM_WEEK_STARTS = [
     '2026-08-11','2026-08-17','2026-08-24','2026-08-31','2026-09-07','2026-09-14',
@@ -1383,6 +1392,15 @@
     178.3,178.3,178.3,178.3,178.3,178.3,178.3
   ];
 
+  /* ---------- editable plan (copy-on-write over the defaults) ---------- */
+
+  function imDietTables(){ return imState.plan.diet || IM_DIET; }
+  function imLiftsData(){ return imState.plan.lifts || IM_LIFTS; }
+  function imTemplateData(){ return imState.plan.template || IM_TEMPLATE; }
+  function imEditableDiet(){ if(!imState.plan.diet) imState.plan.diet = clone(IM_DIET); return imState.plan.diet; }
+  function imEditableLifts(){ if(!imState.plan.lifts) imState.plan.lifts = clone(IM_LIFTS); return imState.plan.lifts; }
+  function imEditableTemplate(){ if(!imState.plan.template) imState.plan.template = clone(IM_TEMPLATE); return imState.plan.template; }
+
   /* ---------- plan resolvers ---------- */
 
   // Week number (1-31) for a date, or null outside the plan window.
@@ -1431,7 +1449,7 @@
     var wk = imWeekOf(dateStr);
     if(!wk) return [];
     if(dateStr === IM_RACE_DAY) return [];
-    var tpl = IM_TEMPLATE[imPhaseOf(wk)] || {};
+    var tpl = imTemplateData()[imPhaseOf(wk)] || {};
     return (tpl[imWeekdayOf(dateStr)] || []).slice();
   }
 
@@ -1440,9 +1458,10 @@
   function imLiftDaysFor(week){
     if(!week || week === 31) return {};
     if(week === 30) return { 1: { key:'fullbody', name:'Light full-body (one session, easy)' } };
-    var out = {};
+    var out = {}, data = imLiftsData();
     IM_LIFT_ORDER.forEach(function(k){
-      var s = IM_LIFTS[k];
+      var s = data[k];
+      if(!s) return;
       out[s.day] = { key:k, name: s.name + (week === 29 ? ' — all lifts 2 sets' : '') };
     });
     return out;
@@ -1465,14 +1484,17 @@
   function imDietFor(dateStr){
     var wk = imWeekOf(dateStr);
     if(!wk) return null;
-    if(imIsRecovery(wk)) return { label:'Recovery day', meals: IM_DIET.recovery };
+    var tables = imDietTables();
+    if(imIsRecovery(wk)) return { label:'Recovery day', key:'recovery', meals: tables.recovery };
     var phase = imPhaseOf(wk);
     if(phase === 'TAPER') phase = 'C';
     var wd = imWeekdayOf(dateStr);
     var isLong = (wd === 0 || wd === 6);
+    var key = phase + (isLong ? '_long' : '_standard');
     return {
       label: (isLong ? 'Long-session day' : 'Standard day') + ' · Phase ' + phase,
-      meals: IM_DIET[phase + (isLong ? '_long' : '_standard')]
+      key: key,
+      meals: tables[key]
     };
   }
   function imMealKcal(m){ return (m[2] + m[3]) * 4 + m[4] * 9; }
@@ -1504,9 +1526,9 @@
     });
     var lift = imLiftDaysFor(wk)[wd];
     if(lift){
-      var subs = [];
-      if(IM_LIFTS[lift.key]){
-        IM_LIFTS[lift.key].ex.forEach(function(ex, i){
+      var subs = [], liftsData = imLiftsData();
+      if(liftsData[lift.key]){
+        liftsData[lift.key].ex.forEach(function(ex, i){
           subs.push({ key:'lx_'+lift.key+'_'+i, label:ex[0], sets:imLiftSetsFor(ex, wk), anchor:!!ex[2] });
         });
       }
@@ -1547,17 +1569,36 @@
   // percentages, never raw item counts: a week holds ~40 meals, ~4 lifts and
   // ~9 endurance sessions, so raw counting would let diet drown everything
   // and make a skipped 3-hour ride nearly invisible.
+  // Freeze a day's prescribed/checked counts against the CURRENT plan.
+  // Called whenever the day's checks change; the weekly rollup reads these
+  // for past days, so a later plan edit never rewrites logged history.
+  function imWriteDaySnap(dateStr){
+    var checks = imState.checks[dateStr];
+    if(!checks || !Object.keys(checks).length){
+      if(imState.daySnaps[dateStr]) delete imState.daySnaps[dateStr];
+      return;
+    }
+    var sc = imDayScore(dateStr);
+    if(sc) imState.daySnaps[dateStr] = sc.counts;
+  }
+
   function imWeekScore(week){
     var range = imWeekRange(week);
     var today = todayStr();
     var sums = { diet:{done:0,of:0}, lifting:{done:0,of:0}, training:{done:0,of:0} };
     var d = range.start, counted = 0;
     while(d <= range.end && d <= today){
-      var sc = imDayScore(d);
-      if(sc){
+      // Past days: prefer the frozen snapshot (immutable history). Today (or
+      // days never logged) score live against the current plan.
+      var counts = (d < today && imState.daySnaps[d]) ? imState.daySnaps[d] : null;
+      if(!counts){
+        var sc = imDayScore(d);
+        counts = sc ? sc.counts : null;
+      }
+      if(counts){
         IM_CATS.forEach(function(cat){
-          sums[cat].done += sc.counts[cat].done;
-          sums[cat].of += sc.counts[cat].of;
+          sums[cat].done += counts[cat].done;
+          sums[cat].of += counts[cat].of;
         });
         counted++;
       }
@@ -1575,6 +1616,7 @@
     if(!c){ c = {}; imState.checks[dateStr] = c; }
     if(c[key]) delete c[key]; else c[key] = true;
     if(Object.keys(c).length === 0) delete imState.checks[dateStr];
+    imWriteDaySnap(dateStr);
     imSave();
   }
   function imPct(frac){ return frac == null ? null : Math.round(frac * 100); }
@@ -1582,6 +1624,14 @@
   // Read-only hook so automated tests can exercise the scoring engine
   // directly; the app itself never uses it.
   window.__imDebug = { dayPlan: imDayPlan, dayScore: imDayScore, weekScore: imWeekScore };
+
+  // One-time: freeze snapshots for days checked before daySnaps existed
+  // (best-effort against the current plan, like the BB backfill).
+  if(imState.snapsV !== 1){
+    Object.keys(imState.checks).forEach(function(d){ imWriteDaySnap(d); });
+    imState.snapsV = 1;
+    imSave();
+  }
 
   // Ask the browser to keep this app's data persistent (reduces automatic
   // eviction). Note: this does NOT survive the user deleting the app — that
@@ -3757,8 +3807,6 @@
 
   /* ===================== IRONMAN MODE: TABS ===================== */
 
-  var IM_RACE_DAY = "2027-03-14";
-
   function renderImToday(){
     var ds = todayStr();
     var days = Math.round((new Date(IM_RACE_DAY+"T00:00:00") - new Date(ds+"T00:00:00"))/(24*3600*1000));
@@ -3884,12 +3932,102 @@
   }
 
   /* ----- TRAINING: this week's swim/bike/run with prescriptions ----- */
+
+  var imTrainEdit = false;
+  var imTrainEditPhase = null;
+  var IM_WD_ORDER = [1,2,3,4,5,6,0];
+  var IM_WD_NAMES = {1:'Monday',2:'Tuesday',3:'Wednesday',4:'Thursday',5:'Friday',6:'Saturday',0:'Sunday'};
+
+  function renderImTrainingEditor(){
+    var tpl = imEditableTemplate();
+    if(!imTrainEditPhase || !tpl[imTrainEditPhase]){
+      var wkNow = imWeekOf(todayStr());
+      imTrainEditPhase = wkNow ? imPhaseOf(wkNow) : 'A';
+    }
+    var html = '<select class="field-input" id="imTrainPhaseSel" style="margin-bottom:.8rem;font-weight:700;">';
+    ['A','B','C','TAPER'].forEach(function(p){
+      html += '<option value="'+p+'"'+(p===imTrainEditPhase?' selected':'')+'>'+(p==='TAPER'?'Taper (weeks 29-31)':'Phase '+p)+'</option>';
+    });
+    html += '</select>';
+    html += '<div class="card-sub" style="margin-bottom:.8rem;">These sessions repeat every week of the phase. Optional sessions never count toward adherence. Past days keep the adherence they were scored with.</div>';
+    var days = tpl[imTrainEditPhase];
+    IM_WD_ORDER.forEach(function(wd){
+      var sessions = days[wd] || (days[wd] = []);
+      html += '<div class="card" style="padding-bottom:.7rem;">';
+      html += '<div class="card-title" style="font-size:.9rem;margin-bottom:.6rem;">'+IM_WD_NAMES[wd]+'</div>';
+      sessions.forEach(function(s, i){
+        html += '<div class="ex-edit-row">';
+        html += '<select class="field-input" data-scat="'+wd+':'+i+'" style="flex:0 0 5.2rem;">';
+        ['swim','bike','run'].forEach(function(c){ html += '<option value="'+c+'"'+(s.cat===c?' selected':'')+'>'+c+'</option>'; });
+        html += '</select>';
+        html += '<input class="field-input" data-sdesc="'+wd+':'+i+'" value="'+escAttr(s.desc)+'" placeholder="Session">';
+        html += '<button class="edit-toggle-btn'+(s.optional?' active':'')+'" data-sopt="'+wd+':'+i+'" style="padding:.45rem .5rem;font-size:.62rem;" title="Optional">opt</button>';
+        html += '<button class="remove-line-btn" data-sdel="'+wd+':'+i+'">&times;</button>';
+        html += '</div>';
+      });
+      html += '<button class="add-line-btn" data-sadd="'+wd+'">+ Add session</button>';
+      html += '</div>';
+    });
+    return html;
+  }
+
+  function bindImTrainingEditor(){
+    var days = imEditableTemplate()[imTrainEditPhase];
+    function loc(attr){ var p = attr.split(':'); return { arr:days[parseInt(p[0],10)], i:parseInt(p[1],10) }; }
+    document.getElementById("imTrainPhaseSel").addEventListener("change", function(){
+      imTrainEditPhase = this.value;
+      renderImTraining();
+    });
+    document.querySelectorAll("[data-sdesc]").forEach(function(inp){
+      inp.addEventListener("change", function(){
+        var l = loc(inp.getAttribute("data-sdesc"));
+        if(l.arr && l.arr[l.i]){ l.arr[l.i].desc = inp.value || 'Session'; imSave(); }
+      });
+    });
+    document.querySelectorAll("[data-scat]").forEach(function(sel){
+      sel.addEventListener("change", function(){
+        var l = loc(sel.getAttribute("data-scat"));
+        if(l.arr && l.arr[l.i]){ l.arr[l.i].cat = sel.value; imSave(); }
+      });
+    });
+    document.querySelectorAll("[data-sopt]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var l = loc(btn.getAttribute("data-sopt"));
+        if(l.arr && l.arr[l.i]){ l.arr[l.i].optional = !l.arr[l.i].optional; imSave(); renderImTraining(); }
+      });
+    });
+    document.querySelectorAll("[data-sdel]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var l = loc(btn.getAttribute("data-sdel"));
+        if(l.arr){ l.arr.splice(l.i, 1); imSave(); renderImTraining(); }
+      });
+    });
+    document.querySelectorAll("[data-sadd]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var wd = parseInt(btn.getAttribute("data-sadd"),10);
+        days[wd].push({ cat:'run', desc:'New session' });
+        imSave();
+        renderImTraining();
+      });
+    });
+  }
+
   function renderImTraining(){
     var ds = todayStr(), wk = imWeekOf(ds);
-    var html = '<div class="page-title">Training</div>';
+    var html = '<div class="page-head-row"><div class="page-title">Training</div>';
+    html += '<button class="edit-toggle-btn'+(imTrainEdit?' active':'')+'" id="imTrainEditToggle">'+(imTrainEdit?'Done':'Edit')+'</button></div>';
+    if(imTrainEdit){
+      html += '<div class="page-sub">Edit the weekly sessions</div>';
+      html += renderImTrainingEditor();
+      document.getElementById("content").innerHTML = html;
+      document.getElementById("imTrainEditToggle").addEventListener("click", function(){ imTrainEdit = false; renderImTraining(); });
+      bindImTrainingEditor();
+      return;
+    }
     if(!wk){
       html += '<div class="page-sub">Ironman mode</div>' + imOutsideCard();
       document.getElementById("content").innerHTML = html;
+      document.getElementById("imTrainEditToggle").addEventListener("click", function(){ imTrainEdit = true; renderImTraining(); });
       return;
     }
     var phase = imPhaseOf(wk), vol = imVolumeOf(wk), range = imWeekRange(wk);
@@ -3941,16 +4079,97 @@
       });
     }
     document.getElementById("content").innerHTML = html;
+    document.getElementById("imTrainEditToggle").addEventListener("click", function(){ imTrainEdit = true; renderImTraining(); });
     imBindChecks(renderImTraining);
   }
 
   /* ----- LIFTS: the four sessions, loads tracked per week ----- */
+
+  var imLiftsEdit = false;
+
+  function renderImLiftsEditor(){
+    var data = imEditableLifts();
+    var html = '<div class="card-sub" style="margin-bottom:.8rem;">Rename sessions and exercises, change set schemes, or tap A to mark an anchor lift (anchors keep full sets and load in Phase C). Renaming an exercise starts a fresh load history for it. Past days keep the adherence they were scored with.</div>';
+    IM_LIFT_ORDER.forEach(function(k){
+      var s = data[k];
+      if(!s) return;
+      html += '<div class="card" style="padding-bottom:.7rem;">';
+      html += '<input class="field-input" data-sessname="'+k+'" value="'+escAttr(s.name)+'" style="font-weight:700;margin-bottom:.6rem;">';
+      s.ex.forEach(function(ex, i){
+        html += '<div class="ex-edit-row">';
+        html += '<button class="edit-toggle-btn'+(ex[2]?' active':'')+'" data-anchor="'+k+':'+i+'" style="padding:.45rem .6rem;" title="Anchor lift">A</button>';
+        html += '<input class="field-input" data-exfield="name" data-ex="'+k+':'+i+'" value="'+escAttr(ex[0])+'" placeholder="Exercise">';
+        html += '<input class="field-input scheme-input" data-exfield="sets" data-ex="'+k+':'+i+'" value="'+escAttr(ex[1])+'" placeholder="3x8">';
+        html += '<button class="remove-line-btn" data-delex="'+k+':'+i+'">&times;</button>';
+        html += '</div>';
+      });
+      html += '<button class="add-line-btn" data-addex="'+k+'">+ Add exercise</button>';
+      html += '</div>';
+    });
+    return html;
+  }
+
+  function bindImLiftsEditor(){
+    var data = imEditableLifts();
+    function loc(attr){ var p = attr.split(':'); return { s:data[p[0]], i:parseInt(p[1],10) }; }
+    document.querySelectorAll("[data-sessname]").forEach(function(inp){
+      inp.addEventListener("change", function(){
+        data[inp.getAttribute("data-sessname")].name = inp.value || 'Session';
+        imSave();
+      });
+    });
+    document.querySelectorAll("[data-ex]").forEach(function(inp){
+      inp.addEventListener("change", function(){
+        var l = loc(inp.getAttribute("data-ex"));
+        if(!l.s || !l.s.ex[l.i]) return;
+        if(inp.getAttribute("data-exfield") === "name") l.s.ex[l.i][0] = inp.value || 'Exercise';
+        else l.s.ex[l.i][1] = inp.value || '3x8';
+        imSave();
+      });
+    });
+    document.querySelectorAll("[data-anchor]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var l = loc(btn.getAttribute("data-anchor"));
+        if(!l.s || !l.s.ex[l.i]) return;
+        l.s.ex[l.i][2] = !l.s.ex[l.i][2];
+        imSave();
+        renderImLifts();
+      });
+    });
+    document.querySelectorAll("[data-delex]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var l = loc(btn.getAttribute("data-delex"));
+        if(!l.s || l.s.ex.length <= 1) return;
+        l.s.ex.splice(l.i, 1);
+        imSave();
+        renderImLifts();
+      });
+    });
+    document.querySelectorAll("[data-addex]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        data[btn.getAttribute("data-addex")].ex.push(['New exercise','3x8']);
+        imSave();
+        renderImLifts();
+      });
+    });
+  }
+
   function renderImLifts(){
     var ds = todayStr(), wk = imWeekOf(ds);
-    var html = '<div class="page-title">Lifts</div>';
+    var html = '<div class="page-head-row"><div class="page-title">Lifts</div>';
+    html += '<button class="edit-toggle-btn'+(imLiftsEdit?' active':'')+'" id="imLiftsEditToggle">'+(imLiftsEdit?'Done':'Edit')+'</button></div>';
+    if(imLiftsEdit){
+      html += '<div class="page-sub">Edit the lift sessions</div>';
+      html += renderImLiftsEditor();
+      document.getElementById("content").innerHTML = html;
+      document.getElementById("imLiftsEditToggle").addEventListener("click", function(){ imLiftsEdit = false; renderImLifts(); });
+      bindImLiftsEditor();
+      return;
+    }
     if(!wk){
       html += '<div class="page-sub">Ironman mode</div>' + imOutsideCard();
       document.getElementById("content").innerHTML = html;
+      document.getElementById("imLiftsEditToggle").addEventListener("click", function(){ imLiftsEdit = true; renderImLifts(); });
       return;
     }
     var phase = imPhaseOf(wk), range = imWeekRange(wk);
@@ -3975,8 +4194,10 @@
       html += '<div class="meal-info"><div class="meal-name">Light full-body (one session, easy)</div><div class="meal-name-sub">'+imDayLabel(fbDate)+'</div></div>';
       html += '</div>';
     } else {
+      var liftsData = imLiftsData();
       IM_LIFT_ORDER.forEach(function(k){
-        var s = IM_LIFTS[k];
+        var s = liftsData[k];
+        if(!s) return;
         var d = dateForWd(s.day); // null in week 1 for Monday (6-day week)
         var dayChecks = (d && imState.checks[d]) || {};
         var sChecked = !!dayChecks['l_'+k];
@@ -4005,6 +4226,7 @@
       });
     }
     document.getElementById("content").innerHTML = html;
+    document.getElementById("imLiftsEditToggle").addEventListener("click", function(){ imLiftsEdit = true; renderImLifts(); });
     document.querySelectorAll("[data-imkey]").forEach(function(el){
       el.addEventListener("click", function(){
         if(el.getAttribute("data-imdisabled")) return;
@@ -4025,18 +4247,108 @@
   }
 
   /* ----- DIET: today's meals, shared checkboxes, phase average ----- */
+
+  var imDietEdit = false;
+  var imDietEditTable = null;
+  var IM_DIET_TABLE_LABELS = {
+    A_standard:'Phase A · Standard', A_long:'Phase A · Long day',
+    B_standard:'Phase B · Standard', B_long:'Phase B · Long day',
+    C_standard:'Phase C · Standard', C_long:'Phase C · Long day',
+    recovery:'Recovery week'
+  };
+
+  function renderImDietEditor(){
+    var tables = imEditableDiet();
+    if(!imDietEditTable || !tables[imDietEditTable]){
+      var todayDiet = imDietFor(todayStr());
+      imDietEditTable = (todayDiet && todayDiet.key) || 'A_standard';
+    }
+    var meals = tables[imDietEditTable];
+    var totals = imDietTotals(meals);
+    var html = '';
+    html += '<select class="field-input" id="imDietTableSel" style="margin-bottom:.8rem;font-weight:700;">';
+    Object.keys(IM_DIET_TABLE_LABELS).forEach(function(k){
+      html += '<option value="'+k+'"'+(k===imDietEditTable?' selected':'')+'>'+IM_DIET_TABLE_LABELS[k]+' — '+imDietTotals(tables[k]).kcal+' kcal</option>';
+    });
+    html += '</select>';
+    html += '<div class="card-sub" style="margin-bottom:.8rem;">Editing changes this table for every day it applies to. Past days keep the adherence they were scored with.</div>';
+    meals.forEach(function(m, i){
+      html += '<div class="card" style="padding-bottom:.7rem;">';
+      html += '<div class="edit-line"><input class="field-input" data-df="0" data-mi="'+i+'" value="'+escAttr(m[0])+'" placeholder="Meal name">';
+      html += '<button class="remove-line-btn" data-delmeal="'+i+'">&times;</button></div>';
+      html += '<input class="field-input" data-df="1" data-mi="'+i+'" value="'+escAttr(m[1])+'" placeholder="Foods" style="margin-bottom:.6rem;">';
+      html += '<div class="macro-edit-row">';
+      html += '<div class="macro-edit"><label>Protein g</label><input type="number" inputmode="numeric" data-df="2" data-mi="'+i+'" value="'+escAttr(m[2])+'"></div>';
+      html += '<div class="macro-edit"><label>Carbs g</label><input type="number" inputmode="numeric" data-df="3" data-mi="'+i+'" value="'+escAttr(m[3])+'"></div>';
+      html += '<div class="macro-edit"><label>Fat g</label><input type="number" inputmode="numeric" data-df="4" data-mi="'+i+'" value="'+escAttr(m[4])+'"></div>';
+      html += '<div class="macro-edit"><label>kcal</label><input value="'+imMealKcal(m)+'" disabled style="opacity:.6;"></div>';
+      html += '</div></div>';
+    });
+    html += '<button class="add-line-btn" id="imAddMeal">+ Add meal</button>';
+    html += '<div class="card"><div class="card-sub">Table total: <b style="color:var(--text);">'+totals.kcal+' kcal</b> &middot; P'+totals.p+' C'+totals.c+' F'+totals.f+'</div></div>';
+    return html;
+  }
+
+  function bindImDietEditor(){
+    document.getElementById("imDietTableSel").addEventListener("change", function(){
+      imDietEditTable = this.value;
+      renderImDiet();
+    });
+    document.querySelectorAll("[data-df]").forEach(function(inp){
+      if(inp.disabled) return;
+      inp.addEventListener("change", function(){
+        var meals = imEditableDiet()[imDietEditTable];
+        var mi = parseInt(inp.getAttribute("data-mi"),10), f = parseInt(inp.getAttribute("data-df"),10);
+        if(!meals[mi]) return;
+        if(f >= 2){
+          var v = parseFloat(inp.value);
+          meals[mi][f] = (isNaN(v) || v < 0) ? 0 : v;
+        } else meals[mi][f] = inp.value;
+        imSave();
+        renderImDiet();
+      });
+    });
+    document.querySelectorAll("[data-delmeal]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var meals = imEditableDiet()[imDietEditTable];
+        var mi = parseInt(btn.getAttribute("data-delmeal"),10);
+        if(meals.length <= 1) return; // a day needs at least one meal
+        meals.splice(mi, 1);
+        imSave();
+        renderImDiet();
+      });
+    });
+    document.getElementById("imAddMeal").addEventListener("click", function(){
+      var meals = imEditableDiet()[imDietEditTable];
+      meals.push([(meals.length+1)+' New meal','',0,0,0]);
+      imSave();
+      renderImDiet();
+    });
+  }
+
   function renderImDiet(){
     var ds = todayStr(), wk = imWeekOf(ds);
-    var html = '<div class="page-title">Diet</div>';
+    var html = '<div class="page-head-row"><div class="page-title">Diet</div>';
+    html += '<button class="edit-toggle-btn'+(imDietEdit?' active':'')+'" id="imDietEditToggle">'+(imDietEdit?'Done':'Edit')+'</button></div>';
+    if(imDietEdit){
+      html += '<div class="page-sub">Edit the meal plan</div>';
+      html += renderImDietEditor();
+      document.getElementById("content").innerHTML = html;
+      document.getElementById("imDietEditToggle").addEventListener("click", function(){ imDietEdit = false; renderImDiet(); });
+      bindImDietEditor();
+      return;
+    }
     if(!wk){
       html += '<div class="page-sub">Ironman mode</div>' + imOutsideCard();
       document.getElementById("content").innerHTML = html;
+      document.getElementById("imDietEditToggle").addEventListener("click", function(){ imDietEdit = true; renderImDiet(); });
       return;
     }
     if(ds === IM_RACE_DAY){
       html += '<div class="page-sub">Race day</div>';
       html += '<div class="card" style="border-color:var(--carbs);"><div class="card-title" style="color:var(--carbs);">Race-day fueling</div><div class="card-sub">Eat per your race plan — carbs early, fluids and sodium on schedule. No checklist today.</div></div>';
       document.getElementById("content").innerHTML = html;
+      document.getElementById("imDietEditToggle").addEventListener("click", function(){ imDietEdit = true; renderImDiet(); });
       return;
     }
     var diet = imDietFor(ds), totals = imDietTotals(diet.meals);
@@ -4067,15 +4379,16 @@
 
     // Phase weekly average: 5 standard + 2 long days (recovery weeks eat the
     // recovery table all 7 days).
-    var avg;
-    if(imIsRecovery(wk)) avg = imDietTotals(IM_DIET.recovery).kcal;
+    var avg, tables = imDietTables();
+    if(imIsRecovery(wk)) avg = imDietTotals(tables.recovery).kcal;
     else {
       var ph = imPhaseOf(wk); if(ph === 'TAPER') ph = 'C';
-      avg = Math.round((5 * imDietTotals(IM_DIET[ph+'_standard']).kcal + 2 * imDietTotals(IM_DIET[ph+'_long']).kcal) / 7);
+      avg = Math.round((5 * imDietTotals(tables[ph+'_standard']).kcal + 2 * imDietTotals(tables[ph+'_long']).kcal) / 7);
     }
     html += '<div class="card"><div class="card-sub">Weekly average for '+(imIsRecovery(wk) ? 'a recovery week' : 'this phase')+': <b style="color:var(--text);">'+avg+' kcal/day</b></div></div>';
 
     document.getElementById("content").innerHTML = html;
+    document.getElementById("imDietEditToggle").addEventListener("click", function(){ imDietEdit = true; renderImDiet(); });
     imBindChecks(renderImDiet);
   }
 
@@ -4119,7 +4432,16 @@
     return svg;
   }
 
-  var IM_ANCHOR_NAMES = ['Back squat','Weighted pull-up','Incline barbell press'];
+  // Anchor lift names come from the (possibly user-edited) lift data, so
+  // renaming or re-flagging anchors on the Lifts tab carries through here.
+  function imAnchorNames(){
+    var names = [], data = imLiftsData();
+    IM_LIFT_ORDER.forEach(function(k){
+      var s = data[k];
+      if(s) s.ex.forEach(function(ex){ if(ex[2]) names.push(ex[0]); });
+    });
+    return names;
+  }
 
   function renderImProgress(){
     var ds = todayStr(), wk = imWeekOf(ds);
@@ -4179,7 +4501,7 @@
     html += '<div class="section-title">Anchor lifts vs baseline</div>';
     var warns = [];
     var anchorHtml = '';
-    IM_ANCHOR_NAMES.forEach(function(name){
+    imAnchorNames().forEach(function(name){
       var loads = imState.liftLoads[name] || {};
       var weeks = Object.keys(loads).map(Number).sort(function(a,b){ return a-b; });
       if(!weeks.length){
