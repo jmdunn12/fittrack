@@ -1609,9 +1609,9 @@
     var today = todayStr();
     var sums = { diet:{done:0,of:0}, lifting:{done:0,of:0}, training:{done:0,of:0} };
     var d = range.start, counted = 0;
-    while(d <= range.end && d <= today){
-      // Past days: prefer the frozen snapshot (immutable history). Today (or
-      // days never logged) score live against the current plan.
+    while(d <= range.end){
+      // Past days: prefer the frozen snapshot (immutable history). Today and
+      // future days score live against the current plan.
       var counts = (d < today && imState.daySnaps[d]) ? imState.daySnaps[d] : null;
       if(!counts){
         var sc = imDayScore(d);
@@ -1619,15 +1619,25 @@
       }
       if(counts){
         IM_CATS.forEach(function(cat){
-          sums[cat].done += counts[cat].done;
-          sums[cat].of += counts[cat].of;
+          if(d <= today){
+            // elapsed: prescribed slots count, unchecked = missed
+            sums[cat].done += counts[cat].done;
+            sums[cat].of += counts[cat].of;
+          } else {
+            // future: never counted as missed, but anything already checked
+            // (a session done ahead of its scheduled day) counts as done now
+            sums[cat].done += counts[cat].done;
+          }
         });
-        counted++;
+        if(d <= today) counted++;
       }
       d = shiftISO(d, 1);
     }
     var cats = { diet:null, lifting:null, training:null };
-    IM_CATS.forEach(function(cat){ if(sums[cat].of > 0) cats[cat] = sums[cat].done / sums[cat].of; });
+    IM_CATS.forEach(function(cat){
+      if(sums[cat].of > 0) cats[cat] = Math.min(1, sums[cat].done / sums[cat].of);
+      else if(sums[cat].done > 0) cats[cat] = 1; // work done ahead of any prescribed slot
+    });
     var present = IM_CATS.filter(function(c){ return cats[c] != null; });
     var overall = present.length ? present.reduce(function(s,c){ return s + cats[c]; }, 0) / present.length : null;
     return { week:week, cats:cats, sums:sums, overall:overall, daysCounted:counted };
