@@ -4352,7 +4352,6 @@
       return;
     }
     var diet = imDietFor(ds), totals = imDietTotals(diet.meals);
-    var checks = imState.checks[ds] || {};
     html += '<div class="page-sub">'+diet.label+' &middot; '+fmtFullDate(ds)+'</div>';
 
     html += '<div class="target-strip">';
@@ -4364,10 +4363,9 @@
 
     if(imIsRecovery(wk)) html += '<div class="card" style="border-color:#3A2A1C;"><div class="card-sub"><b style="color:var(--fat);">Recovery week:</b> eating at maintenance all 7 days. Weight holding or rising 1-2 lbs is expected.</div></div>';
 
-    diet.meals.forEach(function(m, i){
-      var checked = !!checks['d'+i];
-      html += '<div class="meal-item'+(checked?' checked':'')+'" data-imkey="d'+i+'" data-imdate="'+ds+'">';
-      html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+    // Display only — checking meals off lives on the Today tab.
+    diet.meals.forEach(function(m){
+      html += '<div class="meal-item" style="cursor:default;">';
       html += '<div class="meal-info"><div class="meal-name">'+esc(m[0])+' &middot; '+imMealKcal(m)+' kcal</div><div class="meal-name-sub">'+esc(m[1])+'</div></div>';
       html += '<div class="meal-macros">'+
         '<span class="macro-chip p">P'+m[2]+'</span>'+
@@ -4389,7 +4387,6 @@
 
     document.getElementById("content").innerHTML = html;
     document.getElementById("imDietEditToggle").addEventListener("click", function(){ imDietEdit = true; renderImDiet(); });
-    imBindChecks(renderImDiet);
   }
 
   /* ----- PROGRESS: weight vs target, adherence history, anchor loads ----- */
