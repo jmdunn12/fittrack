@@ -1544,7 +1544,11 @@
   // - Category % = checked / prescribed, that category only.
   // - A category with ZERO prescribed items that day is EXCLUDED (null),
   //   never scored 0% (Wednesday has no lift; 0% would poison the metric).
-  // - Daily overall = mean of the categories that ARE prescribed.
+  // - Daily overall = mean of DIET and LIFTING only. Training is scored
+  //   weekly, not daily: sessions are checked off on the Training tab on
+  //   whatever day they actually happen, so swapping days (swim today, run
+  //   tomorrow) never dents a daily score — the week is what counts.
+  //   Per-day training counts are still recorded here for the weekly rollup.
   function imDayScore(dateStr){
     var plan = imDayPlan(dateStr);
     if(!plan) return null;
@@ -1558,9 +1562,27 @@
       counts[cat] = { done:done, of:scored.length };
       if(scored.length) cats[cat] = done / scored.length;
     });
-    var present = IM_CATS.filter(function(c){ return cats[c] != null; });
-    var overall = present.length ? present.reduce(function(s,c){ return s + cats[c]; }, 0) / present.length : null;
+    var daily = ['diet','lifting'].filter(function(c){ return cats[c] != null; });
+    var overall = daily.length ? daily.reduce(function(s,c){ return s + cats[c]; }, 0) / daily.length : null;
     return { cats:cats, counts:counts, overall:overall, plan:plan };
+  }
+
+  // Week-to-date training progress across the FULL week (all seven days'
+  // prescribed sessions), regardless of which day each check landed on.
+  function imWeekTrainingProgress(week){
+    var range = imWeekRange(week);
+    var done = 0, of = 0;
+    for(var d = range.start; d <= range.end; d = shiftISO(d, 1)){
+      var plan = imDayPlan(d);
+      if(!plan) continue;
+      var checks = imState.checks[d] || {};
+      plan.items.training.forEach(function(it){
+        if(it.optional) return;
+        of++;
+        if(checks[it.key]) done++;
+      });
+    }
+    return { done:done, of:of };
   }
 
   // Weekly rollup. Per category: total checked / total prescribed across the
@@ -3843,23 +3865,27 @@
       html += '<div class="plan-head"><span class="plan-label">Plan followed today</span><span class="plan-pct">'+(oPct == null ? '&mdash;' : oPct+'%')+'</span></div>';
       html += '<div class="plan-track"><span class="plan-fill" style="width:'+(oPct||0)+'%"></span></div>';
       html += '<div class="plan-breakdown">';
-      IM_CATS.forEach(function(cat){
+      ['diet','lifting'].forEach(function(cat){
         var label = cat.charAt(0).toUpperCase() + cat.slice(1);
         var p = imPct(score.cats[cat]);
         if(p == null) html += '<span class="plan-chip rest">'+label+' &mdash; none today</span>';
         else html += '<span class="plan-chip'+(p >= 100 ? ' done' : '')+'">'+label+' '+p+'% ('+score.counts[cat].done+'/'+score.counts[cat].of+')</span>';
       });
+      var wtp = imWeekTrainingProgress(wk);
+      if(wtp.of > 0) html += '<span class="plan-chip'+(wtp.done >= wtp.of ? ' done' : '')+'">Training '+wtp.done+'/'+wtp.of+' this week</span>';
       html += '</div></div>';
 
       var CAT_TITLES = { diet:'Diet', lifting:'Lifting', training:'Training' };
       IM_CATS.forEach(function(cat){
         var list = score.plan.items[cat];
         if(!list.length) return;
+        var readOnly = cat === 'training'; // sessions are checked off on the Training tab
         html += '<div class="section-title">'+CAT_TITLES[cat]+'</div>';
+        if(readOnly) html += '<div class="card-sub" style="margin:-.35rem 0 .55rem;">Today\'s plan — check sessions off on the Training tab, whichever day you do them.</div>';
         list.forEach(function(it){
           var checked = !!checks[it.key];
-          html += '<div class="meal-item'+(checked?' checked':'')+'" data-imkey="'+it.key+'">';
-          html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+          html += '<div class="meal-item'+(checked?' checked':'')+'"'+(readOnly ? ' style="cursor:default;"' : ' data-imkey="'+it.key+'"')+'>';
+          if(!readOnly) html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
           html += '<div class="meal-info"><div class="meal-name">'+esc(it.label)+'</div>'+(it.sub ? '<div class="meal-name-sub">'+it.sub+'</div>' : '')+'</div>';
           if(it.cat) html += '<span class="im-cat-chip '+it.cat+'">'+it.cat+'</span>';
           if(it.optional) html += '<span class="im-opt-tag">optional</span>';
