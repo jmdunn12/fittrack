@@ -1184,6 +1184,7 @@
     if(!s || typeof s !== "object" || Array.isArray(s)) s = {};
     if(!s.checks || typeof s.checks !== "object") s.checks = {};       // per-date {itemKey:true}
     if(!s.liftLoads || typeof s.liftLoads !== "object") s.liftLoads = {}; // per-exercise load history
+    if(!s.cheats || typeof s.cheats !== "object") s.cheats = {};       // per-date [{name,kcal,p,c,f}]
     // User edits to the plan live here (diet / lifts / template), cloned
     // from the built-in defaults on first edit. Empty = stock plan.
     if(!s.plan || typeof s.plan !== "object" || Array.isArray(s.plan)) s.plan = {};
@@ -1564,7 +1565,27 @@
     });
     var daily = ['diet','lifting'].filter(function(c){ return cats[c] != null; });
     var overall = daily.length ? daily.reduce(function(s,c){ return s + cats[c]; }, 0) / daily.length : null;
-    return { cats:cats, counts:counts, overall:overall, plan:plan };
+
+    // Cheat meals (same rules as bodybuilding mode): off-plan food never
+    // earns credit — the skipped plan meal stays unchecked — but its
+    // calories count toward the day's intake, and blowing past the day's
+    // calorie goal docks the score proportionally, capped at 40 points.
+    var cheats = imState.cheats[dateStr] || [];
+    var cheatKcal = 0;
+    cheats.forEach(function(ch){ cheatKcal += (ch.kcal || 0); });
+    var dietInfo = imDietFor(dateStr);
+    var goalKcal = dietInfo ? imDietTotals(dietInfo.meals).kcal : 0;
+    var consumedKcal = cheatKcal;
+    if(dietInfo) dietInfo.meals.forEach(function(m, i){ if(checks['d'+i]) consumedKcal += imMealKcal(m); });
+    var calPenalty = 0;
+    if(goalKcal > 0 && consumedKcal > goalKcal){
+      calPenalty = clamp((consumedKcal - goalKcal) / goalKcal * 100, 0, 40);
+    }
+    if(overall != null) overall = clamp(overall - calPenalty/100, 0, 1);
+
+    return { cats:cats, counts:counts, overall:overall, plan:plan,
+             cheatCount:cheats.length, cheatKcal:cheatKcal,
+             consumedKcal:consumedKcal, goalKcal:goalKcal, calPenalty:Math.round(calPenalty) };
   }
 
   // Week-to-date training progress across the FULL week (all seven days'
@@ -1596,26 +1617,37 @@
   // for past days, so a later plan edit never rewrites logged history.
   function imWriteDaySnap(dateStr){
     var checks = imState.checks[dateStr];
-    if(!checks || !Object.keys(checks).length){
+    var cheats = imState.cheats[dateStr];
+    if((!checks || !Object.keys(checks).length) && (!cheats || !cheats.length)){
       if(imState.daySnaps[dateStr]) delete imState.daySnaps[dateStr];
       return;
     }
     var sc = imDayScore(dateStr);
-    if(sc) imState.daySnaps[dateStr] = sc.counts;
+    if(sc){
+      var snap = sc.counts;
+      snap.pen = sc.calPenalty;
+      snap.cheat = sc.cheatCount;
+      imState.daySnaps[dateStr] = snap;
+    }
   }
 
   function imWeekScore(week){
     var range = imWeekRange(week);
     var today = todayStr();
     var sums = { diet:{done:0,of:0}, lifting:{done:0,of:0}, training:{done:0,of:0} };
-    var d = range.start, counted = 0;
+    var d = range.start, counted = 0, penSum = 0, cheatDays = 0;
     while(d <= range.end){
       // Past days: prefer the frozen snapshot (immutable history). Today and
       // future days score live against the current plan.
       var counts = (d < today && imState.daySnaps[d]) ? imState.daySnaps[d] : null;
-      if(!counts){
+      var pen = 0, cheated = 0;
+      if(counts){
+        pen = counts.pen || 0;
+        cheated = counts.cheat || 0;
+      } else {
         var sc = imDayScore(d);
         counts = sc ? sc.counts : null;
+        if(sc){ pen = sc.calPenalty || 0; cheated = sc.cheatCount || 0; }
       }
       if(counts){
         IM_CATS.forEach(function(cat){
@@ -1629,7 +1661,11 @@
             sums[cat].done += counts[cat].done;
           }
         });
-        if(d <= today) counted++;
+        if(d <= today){
+          counted++;
+          penSum += pen;
+          if(cheated) cheatDays++;
+        }
       }
       d = shiftISO(d, 1);
     }
@@ -1640,7 +1676,10 @@
     });
     var present = IM_CATS.filter(function(c){ return cats[c] != null; });
     var overall = present.length ? present.reduce(function(s,c){ return s + cats[c]; }, 0) / present.length : null;
-    return { week:week, cats:cats, sums:sums, overall:overall, daysCounted:counted };
+    // average daily over-calorie penalty drags the week down, same as BB mode
+    var avgPen = counted ? penSum / counted : 0;
+    if(overall != null) overall = clamp(overall - avgPen/100, 0, 1);
+    return { week:week, cats:cats, sums:sums, overall:overall, daysCounted:counted, cheatDays:cheatDays };
   }
 
   function imToggle(dateStr, key){
@@ -3883,6 +3922,8 @@
       });
       var wtp = imWeekTrainingProgress(wk);
       if(wtp.of > 0) html += '<span class="plan-chip'+(wtp.done >= wtp.of ? ' done' : '')+'">Training '+wtp.done+'/'+wtp.of+' this week</span>';
+      if(score.cheatCount) html += '<span class="plan-chip cheat">Cheat +'+Math.round(score.cheatKcal)+' kcal</span>';
+      if(score.calPenalty > 0) html += '<span class="plan-chip penalty">Over goal &minus;'+score.calPenalty+' pts</span>';
       html += '</div></div>';
 
       var CAT_TITLES = { diet:'Diet', lifting:'Lifting', training:'Training' };
@@ -3915,6 +3956,38 @@
           }
         });
       });
+
+      // ----- cheat meal / off-plan food (same rules as BB mode) -----
+      var cheats = imState.cheats[ds] || [];
+      html += '<div class="card cheat-card">';
+      html += '<div class="card-title">Cheat meal</div>';
+      html += '<div class="card-sub">Log food you ate off-plan. It doesn\'t count toward adherence, and if it pushes you over today\'s '+score.goalKcal+' kcal your score takes a hit. Leave the meal you skipped un-checked above.</div>';
+      if(cheats.length){
+        html += '<div class="cheat-list">';
+        cheats.forEach(function(ch, ci){
+          var macroBits = [];
+          if(ch.p) macroBits.push('P'+Math.round(ch.p));
+          if(ch.c) macroBits.push('C'+Math.round(ch.c));
+          if(ch.f) macroBits.push('F'+Math.round(ch.f));
+          var sub = macroBits.length ? macroBits.join(' · ') : 'manual entry';
+          html += '<div class="cheat-entry">'+
+            '<div class="ce-info"><div class="ce-name">'+esc(ch.name || 'Cheat meal')+'</div><div class="ce-sub">'+sub+'</div></div>'+
+            '<span class="ce-kcal">'+Math.round(ch.kcal||0)+' kcal</span>'+
+            '<button class="ce-del" data-imcheatdel="'+ci+'" aria-label="Remove">&times;</button>'+
+            '</div>';
+        });
+        html += '</div>';
+      }
+      html += '<input class="weight-input" id="imCheatName" type="text" placeholder="What was it? (optional)" style="width:100%;margin-bottom:.5rem;">';
+      html += '<div class="cheat-macro-row">';
+      html += '<input class="weight-input" id="imCheatKcal" type="number" inputmode="numeric" step="1" placeholder="Cal">';
+      html += '<input class="weight-input" id="imCheatP" type="number" inputmode="numeric" step="1" placeholder="P">';
+      html += '<input class="weight-input" id="imCheatC" type="number" inputmode="numeric" step="1" placeholder="C">';
+      html += '<input class="weight-input" id="imCheatF" type="number" inputmode="numeric" step="1" placeholder="F">';
+      html += '</div>';
+      html += '<button class="cheat-add-btn" id="imCheatAddBtn">Add cheat meal</button>';
+      html += '<div class="save-flash" id="imCheatFlash" style="color:var(--cheat);"></div>';
+      html += '</div>';
     }
 
     // Bodyweight — the one store shared with bodybuilding mode.
@@ -3944,6 +4017,41 @@
         ev.stopPropagation(); // sub-item taps must not toggle the parent card
         imToggle(ds, el.getAttribute("data-imkey"));
         renderImToday();
+      });
+    });
+    var cheatBtn = document.getElementById("imCheatAddBtn");
+    if(cheatBtn) cheatBtn.addEventListener("click", function(){
+      var name = document.getElementById("imCheatName").value.trim();
+      var kcal = parseFloat(document.getElementById("imCheatKcal").value);
+      var p = parseFloat(document.getElementById("imCheatP").value);
+      var c = parseFloat(document.getElementById("imCheatC").value);
+      var f = parseFloat(document.getElementById("imCheatF").value);
+      p = isNaN(p)||p<0 ? 0 : p; c = isNaN(c)||c<0 ? 0 : c; f = isNaN(f)||f<0 ? 0 : f;
+      // if calories weren't entered, derive them from the macros
+      if(isNaN(kcal) || kcal < 0) kcal = p*4 + c*4 + f*9;
+      if(kcal <= 0 && p<=0 && c<=0 && f<=0){
+        var fl = document.getElementById("imCheatFlash");
+        fl.textContent = "Enter calories or macros first";
+        setTimeout(function(){ if(fl) fl.textContent=""; }, 1800);
+        return;
+      }
+      if(!imState.cheats[ds]) imState.cheats[ds] = [];
+      imState.cheats[ds].push({ name:name, kcal:Math.round(kcal), p:p, c:c, f:f });
+      imWriteDaySnap(ds);
+      imSave();
+      renderImToday();
+    });
+    document.querySelectorAll("[data-imcheatdel]").forEach(function(el){
+      el.addEventListener("click", function(){
+        var ci = parseInt(el.getAttribute("data-imcheatdel"), 10);
+        var arr = imState.cheats[ds];
+        if(arr && ci >= 0 && ci < arr.length){
+          arr.splice(ci, 1);
+          if(arr.length === 0) delete imState.cheats[ds];
+          imWriteDaySnap(ds);
+          imSave();
+          renderImToday();
+        }
       });
     });
   }
@@ -4515,7 +4623,7 @@
         any = true;
         var o = imPct(sc.overall);
         html += '<div class="card wk-adh'+(w2===wk?' current':'')+'">';
-        html += '<div class="wk-adh-head"><div><div class="wk-adh-title">Week '+w2+(w2===wk?' <span class="wk-tag">this week</span>':'')+'</div>';
+        html += '<div class="wk-adh-head"><div><div class="wk-adh-title">Week '+w2+(w2===wk?' <span class="wk-tag">this week</span>':'')+(sc.cheatDays?' <span class="wk-tag cheat">'+sc.cheatDays+' cheat day'+(sc.cheatDays>1?'s':'')+'</span>':'')+'</div>';
         var rg = imWeekRange(w2);
         html += '<div class="wk-adh-range">'+fmtDate(rg.start)+' &ndash; '+fmtDate(rg.end)+'</div></div>';
         html += '<div class="wk-adh-pct '+adherenceClass(o)+'-text">'+o+'%</div></div>';
