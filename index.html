@@ -3878,11 +3878,20 @@
   /* ===================== IRONMAN MODE: TABS ===================== */
 
   function renderImToday(){
-    var ds = todayStr();
+    // Day picker: today or yesterday only — one day of back-fill, no more.
+    if(todayViewDate == null) todayViewDate = todayStr();
+    if(todayViewDate !== todayStr() && todayViewDate !== dateNDaysAgo(1)) todayViewDate = todayStr();
+    var ds = todayViewDate;
+    var isToday = ds === todayStr();
     var days = Math.round((new Date(IM_RACE_DAY+"T00:00:00") - new Date(ds+"T00:00:00"))/(24*3600*1000));
     var wk = imWeekOf(ds);
-    var html = '<div class="page-title">Today</div>';
-    html += '<div class="page-sub">Ironman mode &middot; '+fmtFullDate(ds)+'</div>';
+    var html = '<div class="page-head-row"><select class="today-select" id="imTodaySelect">';
+    for(var off = 0; off <= 1; off++){
+      var od = dateNDaysAgo(off);
+      html += '<option value="'+od+'"'+(od===ds?' selected':'')+'>'+(off===0?'Today':'Yesterday')+'</option>';
+    }
+    html += '</select></div>';
+    html += '<div class="page-sub">Ironman mode &middot; '+fmtFullDate(ds)+(isToday ? '' : ' &middot; <span style="color:var(--accent);font-weight:700;">back-filling yesterday</span>')+'</div>';
 
     if(ds === IM_RACE_DAY){
       html += '<div class="card" style="border-color:var(--carbs);"><div class="card-title" style="color:var(--carbs);">RACE DAY</div>';
@@ -3991,7 +4000,7 @@
     }
 
     // Bodyweight — the one store shared with bodybuilding mode.
-    var ds = todayStr(), saved = "";
+    var saved = "";
     for(var i=0;i<state.weights.length;i++){ if(state.weights[i].date === ds){ saved = state.weights[i].weight; break; } }
     html += '<div class="card">';
     html += '<div class="card-title">Bodyweight</div>';
@@ -4004,10 +4013,14 @@
     html += '</div>';
     document.getElementById("content").innerHTML = html;
 
+    document.getElementById("imTodaySelect").addEventListener("change", function(){
+      todayViewDate = this.value;
+      renderImToday();
+    });
     document.getElementById("imSaveWeightBtn").addEventListener("click", function(){
       var v = parseFloat(document.getElementById("imWeightInput").value);
       if(isNaN(v) || v <= 0) return;
-      setWeight(todayStr(), v);
+      setWeight(ds, v);
       var flash = document.getElementById("imSaveFlash");
       flash.textContent = "Saved to the shared weight log";
       setTimeout(function(){ if(flash) flash.textContent = ""; }, 1800);
