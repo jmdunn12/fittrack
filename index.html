@@ -957,6 +957,120 @@
     return searchOpenFoodFacts(query);
   }
 
+  /* ---- Cheat-meal lookup (BB + Ironman) ----
+     Branded/off-plan food is usually eaten as a serving, not per-100g, so
+     this variant prefers Open Food Facts per-serving values (a candy bar's
+     serving IS the bar). Typing grams in the query ("snickers 50g") scales
+     per-100g data instead. */
+
+  function parseCheatQuery(q){
+    var m = /(\d+(?:\.\d+)?)\s*g\b/i.exec(q);
+    var name = q.replace(/(\d+(?:\.\d+)?)\s*g\b/ig, " ").replace(/\s+/g, " ").trim();
+    return { grams: m ? parseFloat(m[1]) : null, name: name || q };
+  }
+
+  function searchCheatOFF(query){
+    var params = new URLSearchParams({
+      search_terms: query,
+      search_simple: "1",
+      action: "process",
+      json: "1",
+      page_size: "10",
+      fields: "product_name,nutriments,serving_size"
+    });
+    var url = "https://world.openfoodfacts.org/cgi/search.pl?" + params.toString();
+    return fetch(url).then(function(res){
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then(function(data){
+      var products = (data && data.products) || [];
+      // "snickers bar" should match the plain Snickers, not "Snickers Ice
+      // Cream Bar Multipack" — generic container words carry no signal.
+      var FILLER = ["bar","candy","snack","piece","slice","bag","bottle","can","pack","cup"];
+      var qTokens = tokenize(query).filter(function(t){ return FILLER.indexOf(t) < 0; });
+      if(!qTokens.length) qTokens = tokenize(query);
+      var best = null, bestScore = -1;
+      products.forEach(function(prod, idx){
+        var n = prod.nutriments || {};
+        var p = parseFloat(n.proteins_100g), c = parseFloat(n.carbohydrates_100g), f = parseFloat(n.fat_100g);
+        var kS = parseFloat(n["energy-kcal_serving"]);
+        var hasPer100 = !(isNaN(p) && isNaN(c) && isNaN(f));
+        var hasServing = !isNaN(kS) || !isNaN(parseFloat(n.proteins_serving));
+        if(!hasPer100 && !hasServing) return;
+        var nameTokens = tokenize(prod.product_name || "");
+        var hits = 0;
+        qTokens.forEach(function(qt){
+          if(nameTokens.some(function(nt){ return nt === qt || nt.indexOf(qt) === 0 || qt.indexOf(nt) === 0; })) hits++;
+        });
+        var coverage = qTokens.length ? hits/qTokens.length : 0;
+        var score = coverage*10 - nameTokens.length*0.1 - idx*0.05 + (hasServing ? 0.5 : 0);
+        if(score > bestScore){
+          bestScore = score;
+          best = {
+            name: prod.product_name || query,
+            p100: isNaN(p)?0:p, c100: isNaN(c)?0:c, f100: isNaN(f)?0:f,
+            kcal100: parseFloat(n["energy-kcal_100g"]),
+            pS: parseFloat(n.proteins_serving), cS: parseFloat(n.carbohydrates_serving), fS: parseFloat(n.fat_serving),
+            kcalS: kS, servingSize: prod.serving_size || null, hasServing: hasServing
+          };
+        }
+      });
+      return best;
+    });
+  }
+
+  function lookupCheatFood(query){
+    var parsed = parseCheatQuery(query);
+    var builtin = matchBuiltin(parsed.name);
+    if(builtin){
+      var g = parsed.grams || 100;
+      var sc = g/100;
+      var bp = builtin.p*sc, bc = builtin.c*sc, bf = builtin.f*sc;
+      return Promise.resolve({ desc: builtin.name, basis: "for "+g+"g", kcal: bp*4+bc*4+bf*9, p:bp, c:bc, f:bf });
+    }
+    return searchCheatOFF(parsed.name).then(function(r){
+      if(!r) return null;
+      var num = function(v){ return isNaN(v) ? 0 : v; };
+      if(parsed.grams){
+        var s = parsed.grams/100;
+        var p = r.p100*s, c = r.c100*s, f = r.f100*s;
+        var kcal = !isNaN(r.kcal100) ? r.kcal100*s : (p*4 + c*4 + f*9);
+        return { desc: r.name, basis: "for "+parsed.grams+"g", kcal:kcal, p:p, c:c, f:f };
+      }
+      if(r.hasServing){
+        var pS = num(r.pS), cS = num(r.cS), fS = num(r.fS);
+        var kS = !isNaN(r.kcalS) ? r.kcalS : (pS*4 + cS*4 + fS*9);
+        return { desc: r.name, basis: "per serving"+(r.servingSize ? " ("+r.servingSize+")" : ""), kcal:kS, p:pS, c:cS, f:fS };
+      }
+      var k100 = !isNaN(r.kcal100) ? r.kcal100 : (r.p100*4 + r.c100*4 + r.f100*9);
+      return { desc: r.name, basis: "per 100g — adjust for your portion", kcal:k100, p:r.p100, c:r.c100, f:r.f100 };
+    });
+  }
+
+  // Fill a cheat card's Cal/P/C/F inputs from a lookup. ids = {name, kcal,
+  // p, c, f, flash}. Fills only — the user still reviews and taps Add.
+  function runCheatLookup(ids){
+    var flashEl = document.getElementById(ids.flash);
+    function flash(msg, sticky){
+      if(!flashEl) return;
+      flashEl.textContent = msg;
+      if(!sticky) setTimeout(function(){ if(flashEl && flashEl.textContent === msg) flashEl.textContent = ""; }, 5000);
+    }
+    var q = (document.getElementById(ids.name).value || "").trim();
+    if(!q){ flash('Type what you ate first (e.g. "snickers bar")'); return; }
+    flash("Looking up…", true);
+    lookupCheatFood(q).then(function(r){
+      if(!r){ flash("No match found — enter the numbers manually"); return; }
+      document.getElementById(ids.kcal).value = Math.round(r.kcal);
+      document.getElementById(ids.p).value = Math.round(r.p);
+      document.getElementById(ids.c).value = Math.round(r.c);
+      document.getElementById(ids.f).value = Math.round(r.f);
+      flash(r.desc + " · " + r.basis);
+    }).catch(function(){
+      flash("Lookup failed — check connection and try again");
+    });
+  }
+
   var DEFAULT_TRAINING = [
     { day:1, title:"Day 1 — Push", focus:"Chest / Shoulders / Triceps", rest:false, ex:[
       ["Barbell Bench Press","4 x 6-8"],
@@ -2081,7 +2195,8 @@
       });
       html += '</div>';
     }
-    html += '<input class="weight-input" id="cheatName" type="text" placeholder="What was it? (optional)" style="width:100%;margin-bottom:.5rem;">';
+    html += '<div class="weight-row" style="margin-bottom:.5rem;"><input class="weight-input" id="cheatName" type="text" placeholder="What was it? e.g. snickers bar">';
+    html += '<button class="save-btn" id="cheatLookupBtn" style="background:var(--cheat);color:#241206;">Look up</button></div>';
     html += '<div class="cheat-macro-row">';
     html += '<input class="weight-input" id="cheatKcal" type="number" inputmode="numeric" step="1" placeholder="Cal">';
     html += '<input class="weight-input" id="cheatP" type="number" inputmode="numeric" step="1" placeholder="P">';
@@ -2196,6 +2311,9 @@
       renderToday();
     });
 
+    document.getElementById("cheatLookupBtn").addEventListener("click", function(){
+      runCheatLookup({ name:"cheatName", kcal:"cheatKcal", p:"cheatP", c:"cheatC", f:"cheatF", flash:"cheatFlash" });
+    });
     document.getElementById("cheatAddBtn").addEventListener("click", function(){
       var name = document.getElementById("cheatName").value.trim();
       var kcal = parseFloat(document.getElementById("cheatKcal").value);
@@ -3987,7 +4105,8 @@
         });
         html += '</div>';
       }
-      html += '<input class="weight-input" id="imCheatName" type="text" placeholder="What was it? (optional)" style="width:100%;margin-bottom:.5rem;">';
+      html += '<div class="weight-row" style="margin-bottom:.5rem;"><input class="weight-input" id="imCheatName" type="text" placeholder="What was it? e.g. snickers bar">';
+      html += '<button class="save-btn" id="imCheatLookupBtn" style="background:var(--cheat);color:#241206;">Look up</button></div>';
       html += '<div class="cheat-macro-row">';
       html += '<input class="weight-input" id="imCheatKcal" type="number" inputmode="numeric" step="1" placeholder="Cal">';
       html += '<input class="weight-input" id="imCheatP" type="number" inputmode="numeric" step="1" placeholder="P">';
@@ -4031,6 +4150,10 @@
         imToggle(ds, el.getAttribute("data-imkey"));
         renderImToday();
       });
+    });
+    var cheatLookBtn = document.getElementById("imCheatLookupBtn");
+    if(cheatLookBtn) cheatLookBtn.addEventListener("click", function(){
+      runCheatLookup({ name:"imCheatName", kcal:"imCheatKcal", p:"imCheatP", c:"imCheatC", f:"imCheatF", flash:"imCheatFlash" });
     });
     var cheatBtn = document.getElementById("imCheatAddBtn");
     if(cheatBtn) cheatBtn.addEventListener("click", function(){
