@@ -900,21 +900,65 @@
     return bestScore > 0 ? best : null;
   }
 
-  function searchOpenFoodFacts(query){
+  // fetch with a hard timeout — the legacy OFF endpoint can hang for ages,
+  // which reads as "lookup failed" with no way to tell what happened.
+  function fetchJson(url, ms){
+    return new Promise(function(resolve, reject){
+      var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      var done = false;
+      var t = setTimeout(function(){
+        if(done) return;
+        done = true;
+        if(ctrl) ctrl.abort();
+        reject(new Error("timeout"));
+      }, ms || 12000);
+      fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function(r){
+        if(done) return;
+        done = true;
+        clearTimeout(t);
+        if(!r.ok){ reject(new Error("HTTP " + r.status)); return; }
+        resolve(r.json());
+      }).catch(function(e){
+        if(done) return;
+        done = true;
+        clearTimeout(t);
+        reject(e);
+      });
+    });
+  }
+
+  // Open Food Facts, with fallback: the legacy cgi/search.pl endpoint is
+  // deprecated and frequently overloaded (500s / long hangs). Try it first
+  // (well-known response shape), and on failure or an empty result fall back
+  // to the newer search host. Both return items carrying product_name,
+  // nutriments and serving_size.
+  function offFetchProducts(query){
     var params = new URLSearchParams({
       search_terms: query,
       search_simple: "1",
       action: "process",
       json: "1",
       page_size: "10",
-      fields: "product_name,nutriments"
+      fields: "product_name,nutriments,serving_size"
     });
-    var url = "https://world.openfoodfacts.org/cgi/search.pl?" + params.toString();
-    return fetch(url).then(function(res){
-      if(!res.ok) throw new Error("HTTP " + res.status);
-      return res.json();
-    }).then(function(data){
-      var products = (data && data.products) || [];
+    var legacyUrl = "https://world.openfoodfacts.org/cgi/search.pl?" + params.toString();
+    var altUrl = "https://search.openfoodfacts.org/search?q=" + encodeURIComponent(query) + "&page_size=10";
+    function fromAlt(){
+      return fetchJson(altUrl, 12000).then(function(data){
+        return (data && (data.hits || data.products)) || [];
+      });
+    }
+    return fetchJson(legacyUrl, 12000).then(function(data){
+      var prods = (data && data.products) || [];
+      if(prods.length) return prods;
+      return fromAlt().catch(function(){ return prods; }); // legacy empty is a real answer if alt also fails
+    }).catch(function(){
+      return fromAlt();
+    });
+  }
+
+  function searchOpenFoodFacts(query){
+    return offFetchProducts(query).then(function(products){
       var qTokens = tokenize(query);
       // among products with usable per-100g data, pick the one whose name
       // best overlaps the query (first result is often an unrelated brand)
@@ -970,20 +1014,7 @@
   }
 
   function searchCheatOFF(query){
-    var params = new URLSearchParams({
-      search_terms: query,
-      search_simple: "1",
-      action: "process",
-      json: "1",
-      page_size: "10",
-      fields: "product_name,nutriments,serving_size"
-    });
-    var url = "https://world.openfoodfacts.org/cgi/search.pl?" + params.toString();
-    return fetch(url).then(function(res){
-      if(!res.ok) throw new Error("HTTP " + res.status);
-      return res.json();
-    }).then(function(data){
-      var products = (data && data.products) || [];
+    return offFetchProducts(query).then(function(products){
       // "snickers bar" should match the plain Snickers, not "Snickers Ice
       // Cream Bar Multipack" — generic container words carry no signal.
       var FILLER = ["bar","candy","snack","piece","slice","bag","bottle","can","pack","cup"];
