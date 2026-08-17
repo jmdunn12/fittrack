@@ -85,6 +85,8 @@
   .im-day-head{font-size:.78rem;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:.95rem 0 .45rem;}
   .im-load-input{width:4.6rem;background:#0D0F17;border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:.8rem;font-weight:700;padding:.5rem .3rem;border-radius:8px;text-align:center;flex-shrink:0;}
   .im-load-input:focus{outline:none;border-color:var(--accent);}
+  .im-load-col{display:flex;flex-direction:column;align-items:center;gap:.18rem;flex-shrink:0;}
+  .im-load-prev{font-size:.6rem;color:var(--text-faint);font-weight:700;white-space:nowrap;}
   .im-lift-warn{border-color:var(--danger)!important;}
   .im-lift-warn .card-title{color:var(--danger);}
   h1,h2,h3,p{margin:0;}
@@ -4465,6 +4467,18 @@
     });
   }
 
+  // Most recent logged load for an exercise from any week BEFORE this one —
+  // what you have to beat.
+  function imPrevLoad(exName, week){
+    var loads = imState.liftLoads[exName] || {};
+    var best = null;
+    Object.keys(loads).forEach(function(w){
+      w = parseInt(w, 10);
+      if(w < week && (best == null || w > best)) best = w;
+    });
+    return best == null ? null : { week: best, load: loads[best] };
+  }
+
   function renderImLifts(){
     var ds = todayStr(), wk = imWeekOf(ds);
     var html = '<div class="page-head-row"><div class="page-title">Lifts</div>';
@@ -4530,7 +4544,11 @@
           html += '<span class="im-sub-label">'+esc(ex[0])+'</span>';
           if(ex[2]) html += '<span class="im-anchor-tag">ANCHOR</span>';
           html += '<span class="im-sub-sets">'+esc(imLiftSetsFor(ex, wk))+'</span>';
+          var prev = imPrevLoad(ex[0], wk);
+          html += '<div class="im-load-col">';
           html += '<input class="im-load-input" data-exname="'+escAttr(ex[0])+'" type="number" inputmode="decimal" step="2.5" placeholder="lb" value="'+(load != null ? escAttr(load) : '')+'">';
+          if(prev) html += '<span class="im-load-prev">'+(prev.week === wk-1 ? 'last wk' : 'wk '+prev.week)+' '+prev.load+'</span>';
+          html += '</div>';
           html += '</div>';
         });
         html += '</div></div>';
