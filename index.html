@@ -1339,6 +1339,10 @@
     // checks change — so editing the plan later never rewrites the adherence
     // history of days already logged.
     if(!s.daySnaps || typeof s.daySnaps !== "object") s.daySnaps = {};
+    // Per-anchor tracking start week: an exercise anchored (or renamed)
+    // mid-plan is judged from that week on, not against loads logged while
+    // it was something else.
+    if(!s.anchorBaseline || typeof s.anchorBaseline !== "object") s.anchorBaseline = {};
     return s;
   }
   var imState = imLoadState();
@@ -1847,6 +1851,22 @@
   if(imState.snapsV !== 1){
     Object.keys(imState.checks).forEach(function(d){ imWriteDaySnap(d); });
     imState.snapsV = 1;
+    imSave();
+  }
+
+  // One-time: stamp tracking-start weeks for anchors that predate the
+  // baseline feature. The stock anchors keep their full history (week 1);
+  // anchors the user has already swapped in start fresh from the current
+  // week, so old loads logged under a different role never read as decline.
+  if(imState.abV !== 1){
+    var IM_STOCK_ANCHORS = ['Back squat','Weighted pull-up','Incline barbell press'];
+    var wkNow = imWeekOf(todayStr()) || 1;
+    imAnchorNames().forEach(function(nm){
+      if(imState.anchorBaseline[nm] == null){
+        imState.anchorBaseline[nm] = IM_STOCK_ANCHORS.indexOf(nm) >= 0 ? 1 : wkNow;
+      }
+    });
+    imState.abV = 1;
     imSave();
   }
 
@@ -4435,7 +4455,17 @@
       inp.addEventListener("change", function(){
         var l = loc(inp.getAttribute("data-ex"));
         if(!l.s || !l.s.ex[l.i]) return;
-        if(inp.getAttribute("data-exfield") === "name") l.s.ex[l.i][0] = inp.value || 'Exercise';
+        if(inp.getAttribute("data-exfield") === "name"){
+          var oldName = l.s.ex[l.i][0];
+          var newName = inp.value || 'Exercise';
+          l.s.ex[l.i][0] = newName;
+          // a renamed anchor is a new lift: fresh load history, and its
+          // progress baseline starts from this week
+          if(l.s.ex[l.i][2] && newName !== oldName){
+            delete imState.anchorBaseline[oldName];
+            imState.anchorBaseline[newName] = imWeekOf(todayStr()) || 1;
+          }
+        }
         else l.s.ex[l.i][1] = inp.value || '3x8';
         imSave();
       });
@@ -4444,7 +4474,12 @@
       btn.addEventListener("click", function(){
         var l = loc(btn.getAttribute("data-anchor"));
         if(!l.s || !l.s.ex[l.i]) return;
-        l.s.ex[l.i][2] = !l.s.ex[l.i][2];
+        var on = !l.s.ex[l.i][2];
+        l.s.ex[l.i][2] = on;
+        // newly anchored lifts are judged from this week on — loads logged
+        // before (under a different role or weight) don't count against them
+        if(on) imState.anchorBaseline[l.s.ex[l.i][0]] = imWeekOf(todayStr()) || 1;
+        else delete imState.anchorBaseline[l.s.ex[l.i][0]];
         imSave();
         renderImLifts();
       });
@@ -4829,9 +4864,14 @@
     var anchorHtml = '';
     imAnchorNames().forEach(function(name){
       var loads = imState.liftLoads[name] || {};
-      var weeks = Object.keys(loads).map(Number).sort(function(a,b){ return a-b; });
+      // only track from the week this exercise became an anchor — loads
+      // logged before that (as an accessory, or a different lift) are not
+      // this anchor's history and must not read as decline
+      var baseWk = imState.anchorBaseline[name] || 0;
+      var sinceNote = baseWk > 1 ? ' &middot; tracking since wk '+baseWk : '';
+      var weeks = Object.keys(loads).map(Number).filter(function(w){ return w >= baseWk; }).sort(function(a,b){ return a-b; });
       if(!weeks.length){
-        anchorHtml += '<div class="card"><div class="card-title" style="font-size:.9rem;">'+esc(name)+'</div><div class="card-sub">No loads logged yet — enter your top-set weight on the Lifts tab.</div></div>';
+        anchorHtml += '<div class="card"><div class="card-title" style="font-size:.9rem;">'+esc(name)+'</div><div class="card-sub">No loads logged yet'+sinceNote+' — enter your top-set weight on the Lifts tab.</div></div>';
         return;
       }
       var baseline = loads[weeks[0]];
