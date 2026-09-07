@@ -1475,66 +1475,27 @@
   // of a recovery week (overrides the others). Taper weeks use the Phase C
   // tables. Each meal: [name, foods, P, C, F]; kcal is always computed from
   // the summed raw macros (P*4 + C*4 + F*9) — never per-meal-rounded-then-summed.
+  // One plan for every day type (set Sep 2026): 2,300 kcal target /
+  // 225P / 70F spec — entered verbatim; the app computes the real totals
+  // from the summed raw macros (P*4 + C*4 + F*9), never per-meal-rounded.
+  // Each day-type key gets its own clone so the in-app editor can still
+  // diverge them later.
+  var IM_MEALS_2300 = [
+    ['1 Breakfast','200g egg whites, 100g whole eggs, 35g dry oats, 80g blueberries, 18g peanut butter',44,41,21],
+    ['2 Lunch','200g chicken breast (raw weight), 110g cooked jasmine rice, 150g cucumber, 8g olive oil',50,36,11],
+    ['3 Pre-lift','1 scoop whey protein, 1 banana (100g)',26,26,1],
+    ['4 Post-lift','1 scoop whey protein, 80g cooked jasmine rice',27,25,1],
+    ['5 Dinner','180g 96/4 lean ground beef (raw weight), 150g baked sweet potato, 150g Brussels sprouts, 9g olive oil',45,44,17],
+    ['6 Before bed','250g nonfat Greek yogurt, 30g almonds, 100g strawberries',32,23,16]
+  ];
   var IM_DIET = {
-    A_standard: [
-      ['1 Breakfast','200g egg whites, 90g whole eggs, 45g dry oats, 100g blueberries, 14g peanut butter',43,50,19],
-      ['2 Lunch','200g chicken, 150g cooked rice, 150g cucumber, 5g olive oil',51,47,9],
-      ['3 Pre-lift','1 scoop whey, 1 banana (120g)',26,30,1],
-      ['4 Post-lift','1 scoop whey, 120g cooked rice',28,37,1],
-      ['5 Dinner','180g 96/4 beef, 200g sweet potato, 150g Brussels sprouts, 6g olive oil',46,55,14],
-      ['6 Before bed','250g Greek yogurt, 18g almonds, 100g strawberries',29,21,10]
-    ],
-    A_long: [
-      ['1 Breakfast','200g egg whites, 90g whole eggs, 65g dry oats, 100g blueberries, 14g PB, 15g honey',46,76,21],
-      ['2 Intra-session','65g sports drink mix through the session + 1 banana',1,86,0],
-      ['3 Post-session','1 scoop whey, 170g cooked rice, 160g chicken',66,51,4],
-      ['4 Lunch','160g chicken, 200g sweet potato, 150g Brussels, 5g olive oil',45,55,8],
-      ['5 Snack','200g Greek yogurt, 100g strawberries',21,15,1],
-      ['6 Dinner','180g beef, 150g cooked rice, 150g cucumber, 6g olive oil',44,47,14],
-      ['7 Before bed','250g Greek yogurt, 18g almonds, 80g blueberries',29,24,10]
-    ],
-    B_standard: [
-      ['1 Breakfast','200g egg whites, 100g whole eggs, 60g dry oats, 100g blueberries, 16g PB',47,61,22],
-      ['2 Lunch','200g chicken, 180g cooked rice, 150g cucumber, 6g olive oil',52,56,10],
-      ['3 Pre-lift','1 scoop whey, 1 banana, 25g dry oats',30,47,3],
-      ['4 Post-lift','1 scoop whey, 150g cooked rice',29,45,1],
-      ['5 Dinner','180g beef, 260g sweet potato, 150g Brussels, 7g olive oil',48,67,15],
-      ['6 Before bed','250g Greek yogurt, 22g almonds, 100g strawberries',30,21,12]
-    ],
-    B_long: [
-      ['1 Breakfast','200g egg whites, 100g whole eggs, 80g dry oats, 100g blueberries, 16g PB, 20g honey',50,91,24],
-      ['2 Intra-session','100g sports drink mix + 1 banana',1,117,0],
-      ['3 Post-session','1 scoop whey, 230g cooked rice, 160g chicken',68,67,4],
-      ['4 Lunch','160g chicken, 260g sweet potato, 150g Brussels, 5g olive oil',46,67,8],
-      ['5 Snack','200g Greek yogurt, 100g strawberries, 25g dry oats',24,32,2],
-      ['6 Dinner','180g beef, 180g cooked rice, 150g cucumber, 7g olive oil',44,56,15],
-      ['7 Before bed','250g Greek yogurt, 20g almonds, 80g blueberries',30,25,11]
-    ],
-    C_standard: [
-      ['1 Breakfast','200g egg whites, 100g whole eggs, 75g dry oats, 100g blueberries, 20g PB',50,72,25],
-      ['2 Lunch','200g chicken, 220g cooked rice, 150g cucumber, 7g olive oil',53,67,11],
-      ['3 Pre-lift','1 scoop whey, 1 banana, 35g dry oats',31,54,4],
-      ['4 Post-lift','1 scoop whey, 190g cooked rice',30,56,2],
-      ['5 Dinner','180g beef, 300g sweet potato, 150g Brussels, 8g olive oil',48,75,16],
-      ['6 Before bed','250g Greek yogurt, 28g almonds, 100g strawberries',32,23,15]
-    ],
-    C_long: [
-      ['1 Breakfast','180g egg whites, 100g whole eggs, 95g dry oats, 100g blueberries, 18g PB, 20g honey',50,101,26],
-      ['2 Intra-session','155g sports drink mix + 1 banana',1,167,0],
-      ['3 Post-session','1 scoop whey, 280g cooked rice, 160g chicken',69,81,4],
-      ['4 Lunch','170g chicken, 280g sweet potato, 150g Brussels, 6g olive oil',49,71,10],
-      ['5 Snack','200g Greek yogurt, 100g strawberries, 35g dry oats',25,39,3],
-      ['6 Dinner','180g beef, 200g cooked rice, 150g cucumber, 8g olive oil',45,61,16],
-      ['7 Before bed','250g Greek yogurt, 25g almonds, 80g blueberries',31,26,13]
-    ],
-    recovery: [
-      ['1 Breakfast','200g egg whites, 100g whole eggs, 70g dry oats, 100g blueberries, 20g PB',50,68,25],
-      ['2 Lunch','200g chicken, 200g cooked rice, 150g cucumber, 7g olive oil',52,61,11],
-      ['3 Pre-lift','1 scoop whey, 1 banana, 25g dry oats',30,47,3],
-      ['4 Post-lift','1 scoop whey, 170g cooked rice',30,51,2],
-      ['5 Dinner','180g beef, 280g sweet potato, 150g Brussels, 8g olive oil',48,71,16],
-      ['6 Before bed','250g Greek yogurt, 28g almonds, 100g strawberries',32,23,15]
-    ]
+    A_standard: clone(IM_MEALS_2300),
+    A_long: clone(IM_MEALS_2300),
+    B_standard: clone(IM_MEALS_2300),
+    B_long: clone(IM_MEALS_2300),
+    C_standard: clone(IM_MEALS_2300),
+    C_long: clone(IM_MEALS_2300),
+    recovery: clone(IM_MEALS_2300)
   };
 
   // Target bodyweight (lb) per week, 1..31.
@@ -1845,6 +1806,16 @@
   // Read-only hook so automated tests can exercise the scoring engine
   // directly; the app itself never uses it.
   window.__imDebug = { dayPlan: imDayPlan, dayScore: imDayScore, weekScore: imWeekScore };
+
+  // One-time (Sep 2026): the diet moved to one 2,300 kcal plan across all
+  // day types. An in-app-edited copy shadows the defaults forever, so it
+  // must be replaced too — later edits are safe, this runs exactly once.
+  // Frozen day snapshots keep past adherence exactly as it was scored.
+  if(imState.dietV !== 2300){
+    if(imState.plan.diet) imState.plan.diet = clone(IM_DIET);
+    imState.dietV = 2300;
+    imSave();
+  }
 
   // One-time: freeze snapshots for days checked before daySnaps existed
   // (best-effort against the current plan, like the BB backfill).
