@@ -80,6 +80,7 @@
   .im-sub.checked .sc svg{opacity:1;}
   .im-sub-label{flex:1;min-width:0;font-size:.82rem;font-weight:600;}
   .im-sub-sets{font-size:.72rem;color:var(--text-dim);font-weight:700;flex-shrink:0;}
+  .im-sub-note{font-size:.62rem;color:var(--text-faint);font-weight:600;margin-top:.1rem;}
   .im-anchor-tag{font-size:.56rem;font-weight:800;color:var(--fat);background:#FFD16622;padding:.12rem .35rem;border-radius:5px;letter-spacing:.05em;flex-shrink:0;}
   .im-swim-set{font-size:.82rem;margin-top:.55rem;line-height:1.45;}
   .im-day-head{font-size:.78rem;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:.95rem 0 .45rem;}
@@ -1332,6 +1333,9 @@
     if(!s.checks || typeof s.checks !== "object") s.checks = {};       // per-date {itemKey:true}
     if(!s.liftLoads || typeof s.liftLoads !== "object") s.liftLoads = {}; // per-exercise load history
     if(!s.cheats || typeof s.cheats !== "object") s.cheats = {};       // per-date [{name,kcal,p,c,f}]
+    // Standalone lift sessions (week 6+): per plan week, {done:{sessKey:date},
+    // ex:{sessKey_i:true}} — a session completes at most once per week.
+    if(!s.sess || typeof s.sess !== "object") s.sess = {};
     // User edits to the plan live here (diet / lifts / template), cloned
     // from the built-in defaults on first edit. Empty = stock plan.
     if(!s.plan || typeof s.plan !== "object" || Array.isArray(s.plan)) s.plan = {};
@@ -1448,28 +1452,52 @@
   var IM_SWIM_FRAME = '300-400m warm-up, 6 x 50m drills, main set, 200m cool-down';
   var IM_SWIM_DRILLS = ['Catch-up','Fingertip drag','6-3-6','Single-arm','Sculling','Zipper'];
 
-  // Four lift sessions, all 31 weeks. In Phase C and later, accessories drop
-  // to 2 sets; the three ANCHOR lifts stay at 4 x 5 and full load.
-  // [exercise, sets x reps, anchor]
+  // Lifting sessions — STANDALONE from week 6 on: not tied to any weekday,
+  // done whenever they fit, each completable once per plan week. Exercises:
+  // [name, sets, reps, note, isAnchor]. Anchors stay 4 x 5 and full load for
+  // the whole plan; accessories drop to 2 sets in weeks 21-28; week 29
+  // everything 2 sets; week 30 one light Upper A; race week none.
   var IM_LIFTS = {
-    lowerA: { name:'Lower A (heavy)', day:1, ex:[
-      ['Back squat','4x5',true],['Romanian deadlift','3x6'],['Bulgarian split squat','3x8 ea'],
-      ['Standing calf raise','3x10'],['Pallof press','3x12 ea']
+    legs: { name:'Legs (heavy)', ex:[
+      ['Back squat',4,5,'ANCHOR - progress load, not reps',true],
+      ['Romanian deadlift',3,6,'Hamstrings + run durability',false],
+      ['Bulgarian split squat',3,'8 ea','Best injury-prevention lift here',false],
+      ['Leg curl',3,10,'Direct hamstring work',false],
+      ['Standing calf raise',3,10,'Achilles protection',false],
+      ['Seated calf raise',2,12,'',false]
     ]},
-    upperA: { name:'Upper A (heavy)', day:2, ex:[
-      ['Weighted pull-up','4x5',true],['Incline barbell press','4x5',true],
-      ['Chest-supported row','3x6'],['Overhead press','3x6'],['Face pull','3x15']
+    upperA: { name:'Upper A (heavy)', ex:[
+      ['T-bar row',4,5,'ANCHOR - absolute load, never swap this exercise',true],
+      ['Incline barbell press',4,5,'ANCHOR',true],
+      ['Weighted pull-up',3,8,'Swim-specific vertical pull',false],
+      ['Face pull',3,15,'Shoulder health under swim volume',false],
+      ['Pallof press',3,'12 ea','Anti-rotation core',false]
     ]},
-    lowerB: { name:'Lower B (moderate)', day:4, ex:[
-      ['Trap bar deadlift','3x6'],['Leg press','3x8'],['Leg curl','3x10'],
-      ['Walking lunge','2x10 ea'],['Seated calf raise','3x12'],['Hanging leg raise','3x12']
+    upperB: { name:'Upper B (push + arms + core)', ex:[
+      ['Flat DB press',3,8,'',false],
+      ['Overhead press',3,8,'First to drop if shoulders complain',false],
+      ['Dips or close-grip bench',3,8,'',false],
+      ['Lateral raise',3,12,'',false],
+      ['Tricep pushdown',3,12,'',false],
+      ['Hanging leg raise',3,12,'',false]
     ]},
-    upperB: { name:'Upper B (moderate)', day:5, ex:[
-      ['Flat DB press','3x8'],['Lat pulldown','3x8'],['Single-arm DB row','3x10 ea'],
-      ['Lateral raise','3x12'],['DB curl','3x10'],['Overhead triceps extension','3x10']
+    upperC: { name:'Upper C (pull + arms + core)', ex:[
+      ['Lat pulldown',3,8,'',false],
+      ['Single-arm DB row',3,'10 ea','',false],
+      ['Straight-arm cable pulldown',3,12,'Mimics the swim pull-through',false],
+      ['Hammer curl',3,12,'',false],
+      ['Ab wheel rollout',3,10,'',false],
+      ['Side plank',3,'30s ea','',false]
     ]}
   };
-  var IM_LIFT_ORDER = ['lowerA','upperA','lowerB','upperB'];
+  var IM_LIFT_ORDER = ['legs','upperA','upperB','upperC'];
+  // Lifting was weekday-scheduled before week 6 (Mon 2026-09-14). This
+  // frozen map keeps weeks 1-5 scoring exactly as they were logged.
+  var IM_LIFT_CUTOVER_WEEK = 6;
+  var IM_LEGACY_LIFT_DAYS = {
+    1:{ key:'lowerA', name:'Lower A (heavy)' }, 2:{ key:'upperA', name:'Upper A (heavy)' },
+    4:{ key:'lowerB', name:'Lower B (moderate)' }, 5:{ key:'upperB', name:'Upper B (moderate)' }
+  };
 
   // Diet day types: 'standard' Mon-Fri, 'long' Sat-Sun, 'recovery' all 7 days
   // of a recovery week (overrides the others). Taper weeks use the Phase C
@@ -1568,28 +1596,25 @@
 
   // Lift sessions for a week, keyed by JS weekday. Taper: wk 29 all four at
   // 2 sets, wk 30 one light full-body session, wk 31 (race week) none.
+  // Weekday-scheduled lifts exist only for the legacy era (weeks 1-5). From
+  // week 6 lifting is standalone — no day prescribes a lift, so this returns
+  // nothing and the Today checklist's lifting section disappears.
   function imLiftDaysFor(week){
-    if(!week || week === 31) return {};
-    if(week === 30) return { 1: { key:'fullbody', name:'Light full-body (one session, easy)' } };
-    var out = {}, data = imLiftsData();
-    IM_LIFT_ORDER.forEach(function(k){
-      var s = data[k];
-      if(!s) return;
-      out[s.day] = { key:k, name: s.name + (week === 29 ? ' — all lifts 2 sets' : '') };
-    });
+    if(!week || week >= IM_LIFT_CUTOVER_WEEK) return {};
+    var out = {};
+    Object.keys(IM_LEGACY_LIFT_DAYS).forEach(function(wd){ out[wd] = IM_LEGACY_LIFT_DAYS[wd]; });
     return out;
   }
 
-  // Display sets for an exercise: Phase C and later, accessories drop to 2
-  // sets; anchors keep 4x5 at full load.
+  // Display sets for an exercise ([name, sets, reps, note, anchor]):
+  // weeks 21-28 non-anchors drop to 2 sets (anchors stay 4 x 5, full load);
+  // weeks 29-30 everything is 2 sets.
   function imLiftSetsFor(exArr, week){
-    var anchor = !!exArr[2];
-    if(anchor) return exArr[1];
-    var phase = imPhaseOf(week);
-    if(phase === 'C' || phase === 'TAPER'){
-      return '2x' + exArr[1].split('x')[1];
-    }
-    return exArr[1];
+    var sets = exArr[1];
+    var anchor = !!exArr[4];
+    if(week === 29 || week === 30) sets = 2;
+    else if(imPhaseOf(week) === 'C' && !anchor) sets = 2;
+    return sets + 'x' + exArr[2];
   }
 
   // Meals table for a date: recovery overrides; taper eats Phase C; weekend
@@ -1642,7 +1667,7 @@
       var subs = [], liftsData = imLiftsData();
       if(liftsData[lift.key]){
         liftsData[lift.key].ex.forEach(function(ex, i){
-          subs.push({ key:'lx_'+lift.key+'_'+i, label:ex[0], sets:imLiftSetsFor(ex, wk), anchor:!!ex[2] });
+          subs.push({ key:'lx_'+lift.key+'_'+i, label:ex[0], sets:imLiftSetsFor(ex, wk), anchor:!!ex[4] });
         });
       }
       items.lifting.push({ key:'l_'+lift.key, label:lift.name, subs:subs });
@@ -1717,6 +1742,28 @@
     return { done:done, of:of };
   }
 
+  // ---- standalone lift sessions (week 6+) ----
+  function imSessWeek(week){
+    var s = imState.sess[week];
+    if(!s || typeof s !== "object"){ s = { done:{}, ex:{} }; imState.sess[week] = s; }
+    if(!s.done) s.done = {};
+    if(!s.ex) s.ex = {};
+    return s;
+  }
+  function imLiftSessionsDone(week){
+    var s = imState.sess[week];
+    return (s && s.done) ? Object.keys(s.done).length : 0;
+  }
+  // Weekly lifting for the standalone era: sessions completed / target
+  // (4 normally, 1 in taper week 30, none prescribed race week). Returns
+  // null for legacy weeks (1-5), which keep their day-sum scoring.
+  function imWeekLifting(week){
+    if(week < IM_LIFT_CUTOVER_WEEK) return null;
+    if(week === 31) return null; // race week: lifting not prescribed at all
+    var target = (week === 30) ? 1 : 4;
+    return { done: Math.min(imLiftSessionsDone(week), target), of: target };
+  }
+
   // Weekly rollup. Per category: total checked / total prescribed across the
   // week's days, only up to and including today — future days are never
   // counted as missed. Weekly overall = the MEAN of the three category
@@ -1780,6 +1827,10 @@
       }
       d = shiftISO(d, 1);
     }
+    // Standalone era: lifting is sessions-completed / 4 for the week,
+    // independent of any day — the day sums above hold nothing for it.
+    var lift = imWeekLifting(week);
+    if(lift) sums.lifting = { done: lift.done, of: lift.of };
     var cats = { diet:null, lifting:null, training:null };
     IM_CATS.forEach(function(cat){
       if(sums[cat].of > 0) cats[cat] = Math.min(1, sums[cat].done / sums[cat].of);
@@ -1822,6 +1873,22 @@
   if(imState.snapsV !== 1){
     Object.keys(imState.checks).forEach(function(d){ imWriteDaySnap(d); });
     imState.snapsV = 1;
+    imSave();
+  }
+
+  // One-time (Sep 2026, week-6 cutover): lifting rewritten to four standalone
+  // sessions (Legs / Upper A / Upper B / Upper C). Replaces any in-app-edited
+  // stored copy (which shadows the defaults), re-points the anchor set to
+  // Back squat / T-bar row / Incline barbell press, and stamps T-bar row's
+  // baseline at the cutover week so its first logged load becomes 100%.
+  // All logged loads are preserved — removed exercises just stop appearing.
+  if(imState.liftsV !== 2){
+    if(imState.plan.lifts) imState.plan.lifts = clone(IM_LIFTS);
+    if(imState.anchorBaseline['Back squat'] == null) imState.anchorBaseline['Back squat'] = 1;
+    if(imState.anchorBaseline['Incline barbell press'] == null) imState.anchorBaseline['Incline barbell press'] = 1;
+    imState.anchorBaseline['T-bar row'] = IM_LIFT_CUTOVER_WEEK;
+    delete imState.anchorBaseline['Weighted pull-up'];
+    imState.liftsV = 2;
     imSave();
   }
 
@@ -4066,8 +4133,9 @@
       html += '<div class="plan-breakdown">';
       var dp = imPct(score.cats.diet);
       if(dp != null) html += '<span class="plan-chip'+(dp >= 100 ? ' done' : '')+'">Diet '+dp+'% ('+score.counts.diet.done+'/'+score.counts.diet.of+')</span>';
-      var wlp = imWeekCatProgress(wk, 'lifting');
-      if(wlp.of > 0) html += '<span class="plan-chip'+(wlp.done >= wlp.of ? ' done' : '')+'">Lifting '+wlp.done+'/'+wlp.of+' this week</span>';
+      // Standalone era: sessions/4 from the sess store, tap-through to Lifts.
+      var wlp = (wk >= IM_LIFT_CUTOVER_WEEK) ? imWeekLifting(wk) : imWeekCatProgress(wk, 'lifting');
+      if(wlp && wlp.of > 0) html += '<span class="plan-chip'+(wlp.done >= wlp.of ? ' done' : '')+'" id="imGoLifts" style="cursor:pointer;">Lifts this week: '+wlp.done+' / '+wlp.of+' &rsaquo;</span>';
       var wtp = imWeekCatProgress(wk, 'training');
       if(wtp.of > 0) html += '<span class="plan-chip'+(wtp.done >= wtp.of ? ' done' : '')+'">Training '+wtp.done+'/'+wtp.of+' this week</span>';
       if(score.cheatCount) html += '<span class="plan-chip cheat">Cheat +'+Math.round(score.cheatKcal)+' kcal</span>';
@@ -4160,6 +4228,8 @@
       todayViewDate = this.value;
       renderImToday();
     });
+    var goLifts = document.getElementById("imGoLifts");
+    if(goLifts) goLifts.addEventListener("click", function(){ switchTab("lifts"); });
     document.getElementById("imSaveWeightBtn").addEventListener("click", function(){
       var v = parseFloat(document.getElementById("imWeightInput").value);
       if(isNaN(v) || v <= 0) return;
@@ -4393,7 +4463,7 @@
 
   function renderImLiftsEditor(){
     var data = imEditableLifts();
-    var html = '<div class="card-sub" style="margin-bottom:.8rem;">Rename sessions and exercises, change set schemes, or tap A to mark an anchor lift (anchors keep full sets and load in Phase C). Renaming an exercise starts a fresh load history for it. Past days keep the adherence they were scored with.</div>';
+    var html = '<div class="card-sub" style="margin-bottom:.8rem;">Rename sessions and exercises, change sets/reps or the note, or tap A to mark an anchor lift (anchors keep full sets and load from week 21 on). Renaming an exercise starts a fresh load history for it. Past weeks keep the adherence they were scored with.</div>';
     IM_LIFT_ORDER.forEach(function(k){
       var s = data[k];
       if(!s) return;
@@ -4401,11 +4471,13 @@
       html += '<input class="field-input" data-sessname="'+k+'" value="'+escAttr(s.name)+'" style="font-weight:700;margin-bottom:.6rem;">';
       s.ex.forEach(function(ex, i){
         html += '<div class="ex-edit-row">';
-        html += '<button class="edit-toggle-btn'+(ex[2]?' active':'')+'" data-anchor="'+k+':'+i+'" style="padding:.45rem .6rem;" title="Anchor lift">A</button>';
-        html += '<input class="field-input" data-exfield="name" data-ex="'+k+':'+i+'" value="'+escAttr(ex[0])+'" placeholder="Exercise">';
-        html += '<input class="field-input scheme-input" data-exfield="sets" data-ex="'+k+':'+i+'" value="'+escAttr(ex[1])+'" placeholder="3x8">';
+        html += '<button class="edit-toggle-btn'+(ex[4]?' active':'')+'" data-anchor="'+k+':'+i+'" style="padding:.45rem .6rem;" title="Anchor lift">A</button>';
+        html += '<input class="field-input" data-exfield="0" data-ex="'+k+':'+i+'" value="'+escAttr(ex[0])+'" placeholder="Exercise">';
+        html += '<input class="field-input" data-exfield="1" data-ex="'+k+':'+i+'" value="'+escAttr(ex[1])+'" placeholder="Sets" style="flex:0 0 3.2rem;text-align:center;">';
+        html += '<input class="field-input" data-exfield="2" data-ex="'+k+':'+i+'" value="'+escAttr(ex[2])+'" placeholder="Reps" style="flex:0 0 3.6rem;text-align:center;">';
         html += '<button class="remove-line-btn" data-delex="'+k+':'+i+'">&times;</button>';
         html += '</div>';
+        html += '<input class="field-input" data-exfield="3" data-ex="'+k+':'+i+'" value="'+escAttr(ex[3]||'')+'" placeholder="Note (optional)" style="margin:-.15rem 0 .55rem;font-size:.72rem;">';
       });
       html += '<button class="add-line-btn" data-addex="'+k+'">+ Add exercise</button>';
       html += '</div>';
@@ -4426,18 +4498,25 @@
       inp.addEventListener("change", function(){
         var l = loc(inp.getAttribute("data-ex"));
         if(!l.s || !l.s.ex[l.i]) return;
-        if(inp.getAttribute("data-exfield") === "name"){
+        var f = parseInt(inp.getAttribute("data-exfield"), 10);
+        if(f === 0){
           var oldName = l.s.ex[l.i][0];
           var newName = inp.value || 'Exercise';
           l.s.ex[l.i][0] = newName;
           // a renamed anchor is a new lift: fresh load history, and its
           // progress baseline starts from this week
-          if(l.s.ex[l.i][2] && newName !== oldName){
+          if(l.s.ex[l.i][4] && newName !== oldName){
             delete imState.anchorBaseline[oldName];
             imState.anchorBaseline[newName] = imWeekOf(todayStr()) || 1;
           }
+        } else if(f === 1){
+          var n = parseInt(inp.value, 10);
+          l.s.ex[l.i][1] = (isNaN(n) || n < 1) ? 3 : n;
+        } else if(f === 2){
+          l.s.ex[l.i][2] = inp.value || '8';
+        } else {
+          l.s.ex[l.i][3] = inp.value || '';
         }
-        else l.s.ex[l.i][1] = inp.value || '3x8';
         imSave();
       });
     });
@@ -4445,8 +4524,8 @@
       btn.addEventListener("click", function(){
         var l = loc(btn.getAttribute("data-anchor"));
         if(!l.s || !l.s.ex[l.i]) return;
-        var on = !l.s.ex[l.i][2];
-        l.s.ex[l.i][2] = on;
+        var on = !l.s.ex[l.i][4];
+        l.s.ex[l.i][4] = on;
         // newly anchored lifts are judged from this week on — loads logged
         // before (under a different role or weight) don't count against them
         if(on) imState.anchorBaseline[l.s.ex[l.i][0]] = imWeekOf(todayStr()) || 1;
@@ -4466,7 +4545,7 @@
     });
     document.querySelectorAll("[data-addex]").forEach(function(btn){
       btn.addEventListener("click", function(){
-        data[btn.getAttribute("data-addex")].ex.push(['New exercise','3x8']);
+        data[btn.getAttribute("data-addex")].ex.push(['New exercise',3,8,'',false]);
         imSave();
         renderImLifts();
       });
@@ -4503,69 +4582,73 @@
       document.getElementById("imLiftsEditToggle").addEventListener("click", function(){ imLiftsEdit = true; renderImLifts(); });
       return;
     }
-    var phase = imPhaseOf(wk), range = imWeekRange(wk);
-    html += '<div class="page-sub">Week '+wk+' &middot; '+(phase==='TAPER'?'Taper':'Phase '+phase)+'</div>';
-    if(phase === 'C') html += '<div class="card"><div class="card-sub">Phase C: accessories drop to 2 sets. The three ANCHOR lifts stay at 4 x 5 and full load.</div></div>';
-    if(wk === 29) html += '<div class="card"><div class="card-sub">Taper week 29: all four sessions, every lift at 2 sets.</div></div>';
-
-    function dateForWd(wd){
-      for(var d = range.start; d <= range.end; d = shiftISO(d, 1)){ if(imWeekdayOf(d) === wd) return d; }
-      return null;
-    }
+    var phase = imPhaseOf(wk);
+    html += '<div class="page-sub">Week '+wk+' &middot; '+(phase==='TAPER'?'Taper':'Phase '+phase)+' &middot; do sessions whenever they fit — spread them out</div>';
+    if(phase === 'C' && wk <= 28) html += '<div class="card"><div class="card-sub">Weeks 21-28: accessories drop to 2 sets. The three ANCHOR lifts stay at 4 x 5 and full load.</div></div>';
+    if(wk === 29) html += '<div class="card"><div class="card-sub">Taper week 29: everything at 2 sets.</div></div>';
+    if(wk < IM_LIFT_CUTOVER_WEEK) html += '<div class="card"><div class="card-sub">The standalone plan takes over in week '+IM_LIFT_CUTOVER_WEEK+' (Mon '+fmtDate(IM_WEEK_STARTS[IM_LIFT_CUTOVER_WEEK-1])+'). This week still scores on the old weekday schedule.</div></div>';
 
     if(wk === 31){
-      html += '<div class="card" style="border-color:var(--carbs);"><div class="card-title" style="color:var(--carbs);">Race week — no lifting</div>';
+      html += '<div class="card" style="border-color:var(--carbs);"><div class="card-title" style="color:var(--carbs);">Race week: no lifts</div>';
       html += '<div class="card-sub">The work is done. Stay loose, stay fresh.</div></div>';
-    } else if(wk === 30){
-      var fbDate = dateForWd(1);
-      var fbChecked = fbDate && imState.checks[fbDate] && imState.checks[fbDate]['l_fullbody'];
-      html += '<div class="card"><div class="card-title">Taper week 30</div><div class="card-sub">One light full-body session, nothing heavy.</div></div>';
-      html += '<div class="meal-item'+(fbChecked?' checked':'')+'" data-imkey="l_fullbody" data-imdate="'+fbDate+'">';
-      html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
-      html += '<div class="meal-info"><div class="meal-name">Light full-body (one session, easy)</div><div class="meal-name-sub">'+imDayLabel(fbDate)+'</div></div>';
-      html += '</div>';
-    } else {
-      var liftsData = imLiftsData();
-      IM_LIFT_ORDER.forEach(function(k){
-        var s = liftsData[k];
-        if(!s) return;
-        var d = dateForWd(s.day); // null in week 1 for Monday (6-day week)
-        var dayChecks = (d && imState.checks[d]) || {};
-        var sChecked = !!dayChecks['l_'+k];
-        html += '<div class="card" style="padding-bottom:.6rem;">';
-        html += '<div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;"><span>'+esc(s.name)+(wk===29?' — 2 sets':'')+'</span>';
-        html += '<span class="card-sub" style="margin:0;flex-shrink:0;">'+(d ? imDayLabel(d) : 'not in week 1')+'</span></div>';
-        if(d){
-          html += '<div class="meal-item'+(sChecked?' checked':'')+'" style="margin-top:.7rem;" data-imkey="l_'+k+'" data-imdate="'+d+'">';
-          html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
-          html += '<div class="meal-info"><div class="meal-name">Session done</div></div>';
-          html += '</div>';
-        }
-        html += '<div class="im-subs" style="margin-left:0;">';
-        s.ex.forEach(function(ex, i){
-          var exChecked = d && dayChecks['lx_'+k+'_'+i];
-          var load = (imState.liftLoads[ex[0]] || {})[wk];
-          html += '<div class="im-sub'+(exChecked?' checked':'')+'">';
-          html += '<div class="sc" data-imkey="lx_'+k+'_'+i+'" '+(d ? 'data-imdate="'+d+'"' : 'data-imdisabled="1"')+' style="padding:2px;"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
-          html += '<span class="im-sub-label">'+esc(ex[0])+'</span>';
-          if(ex[2]) html += '<span class="im-anchor-tag">ANCHOR</span>';
-          html += '<span class="im-sub-sets">'+esc(imLiftSetsFor(ex, wk))+'</span>';
-          var prev = imPrevLoad(ex[0], wk);
-          html += '<div class="im-load-col">';
-          html += '<input class="im-load-input" data-exname="'+escAttr(ex[0])+'" type="number" inputmode="decimal" step="2.5" placeholder="lb" value="'+(load != null ? escAttr(load) : '')+'">';
-          if(prev) html += '<span class="im-load-prev">'+(prev.week === wk-1 ? 'last wk' : 'wk '+prev.week)+' '+prev.load+'</span>';
-          html += '</div>';
-          html += '</div>';
-        });
-        html += '</div></div>';
-      });
+      document.getElementById("content").innerHTML = html;
+      document.getElementById("imLiftsEditToggle").addEventListener("click", function(){ imLiftsEdit = true; renderImLifts(); });
+      return;
     }
+
+    if(wk === 30) html += '<div class="card"><div class="card-title">Taper week 30 — light</div><div class="card-sub">One light session: Upper A only, everything at 2 sets, nothing heavy.</div></div>';
+
+    var liftsData = imLiftsData();
+    var sessNow = imState.sess[wk] || { done:{}, ex:{} };
+    var keys = (wk === 30) ? ['upperA'] : IM_LIFT_ORDER;
+    keys.forEach(function(k){
+      var s = liftsData[k];
+      if(!s) return;
+      var doneDate = (sessNow.done || {})[k];
+      html += '<div class="card" style="padding-bottom:.6rem;">';
+      html += '<div class="card-title">'+esc(s.name)+(wk===30?' — light':'')+'</div>';
+      html += '<div class="meal-item'+(doneDate?' checked':'')+'" style="margin-top:.7rem;" data-sess="'+k+'">';
+      html += '<div class="check-circle"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+      html += '<div class="meal-info"><div class="meal-name">Session done</div>'+(doneDate ? '<div class="meal-name-sub">Completed '+imDayLabel(doneDate)+' &middot; counted once this week</div>' : '')+'</div>';
+      html += '</div>';
+      html += '<div class="im-subs" style="margin-left:0;">';
+      s.ex.forEach(function(ex, i){
+        var exChecked = !!((sessNow.ex || {})[k+'_'+i]);
+        var load = (imState.liftLoads[ex[0]] || {})[wk];
+        html += '<div class="im-sub'+(exChecked?' checked':'')+'">';
+        html += '<div class="sc" data-sessex="'+k+':'+i+'" style="padding:2px;"><svg viewBox="0 0 24 24" fill="none" stroke="#062019" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+        html += '<span class="im-sub-label">'+esc(ex[0])+(ex[3] ? '<div class="im-sub-note">'+esc(ex[3])+'</div>' : '')+'</span>';
+        if(ex[4]) html += '<span class="im-anchor-tag">ANCHOR</span>';
+        html += '<span class="im-sub-sets">'+esc(imLiftSetsFor(ex, wk))+'</span>';
+        var prev = imPrevLoad(ex[0], wk);
+        html += '<div class="im-load-col">';
+        html += '<input class="im-load-input" data-exname="'+escAttr(ex[0])+'" type="number" inputmode="decimal" step="2.5" placeholder="lb" value="'+(load != null ? escAttr(load) : '')+'">';
+        if(prev) html += '<span class="im-load-prev">'+(prev.week === wk-1 ? 'last wk' : 'wk '+prev.week)+' '+prev.load+'</span>';
+        html += '</div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    });
+
     document.getElementById("content").innerHTML = html;
     document.getElementById("imLiftsEditToggle").addEventListener("click", function(){ imLiftsEdit = true; renderImLifts(); });
-    document.querySelectorAll("[data-imkey]").forEach(function(el){
+    document.querySelectorAll("[data-sess]").forEach(function(el){
       el.addEventListener("click", function(){
-        if(el.getAttribute("data-imdisabled")) return;
-        imToggle(el.getAttribute("data-imdate"), el.getAttribute("data-imkey"));
+        var k = el.getAttribute("data-sess");
+        var s = imSessWeek(wk);
+        if(s.done[k]) delete s.done[k];        // un-mark a mistake
+        else s.done[k] = todayStr();           // one dated completion per week
+        imSave();
+        renderImLifts();
+      });
+    });
+    document.querySelectorAll("[data-sessex]").forEach(function(el){
+      el.addEventListener("click", function(){
+        var p = el.getAttribute("data-sessex").split(':');
+        var s = imSessWeek(wk);
+        var key = p[0]+'_'+p[1];
+        if(s.ex[key]) delete s.ex[key]; else s.ex[key] = true;
+        imSave();
         renderImLifts();
       });
     });
@@ -4770,7 +4853,7 @@
     var names = [], data = imLiftsData();
     IM_LIFT_ORDER.forEach(function(k){
       var s = data[k];
-      if(s) s.ex.forEach(function(ex){ if(ex[2]) names.push(ex[0]); });
+      if(s) s.ex.forEach(function(ex){ if(ex[4]) names.push(ex[0]); });
     });
     return names;
   }
@@ -4863,8 +4946,14 @@
       anchorHtml += '</div></div>';
     });
     if(warns.length){
+      // With one leg day, the squat is the only leg signal — its warning
+      // prescribes a second leg day rather than an endurance cut.
+      var warnLines = warns.map(function(n){
+        if(n === 'Back squat') return 'Squat down 10%+ for 3 weeks — add a second leg day.';
+        return esc(n) + ' has sat 10%+ below its baseline for 3 straight weeks — cut endurance volume 25% until strength recovers.';
+      });
       html += '<div class="card im-lift-warn"><div class="card-title">Strength is sliding</div>';
-      html += '<div class="card-sub">'+warns.map(esc).join(' and ')+' ha'+(warns.length>1?'ve':'s')+' sat 10%+ below the baseline for 3 straight weeks. Cut endurance volume 25% until strength recovers.</div></div>';
+      html += '<div class="card-sub">'+warnLines.join('<br>')+'</div></div>';
     }
     html += anchorHtml;
 
