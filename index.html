@@ -1462,6 +1462,7 @@
       ['Back squat',4,5,'ANCHOR - progress load, not reps',true],
       ['Romanian deadlift',3,6,'Hamstrings + run durability',false],
       ['Bulgarian split squat',3,'8 ea','Best injury-prevention lift here',false],
+      ['Leg press',3,8,'Quad volume without more spinal load',false],
       ['Leg curl',3,10,'Direct hamstring work',false],
       ['Standing calf raise',3,10,'Achilles protection',false],
       ['Seated calf raise',2,12,'',false]
@@ -1471,7 +1472,8 @@
       ['Incline barbell press',4,5,'ANCHOR',true],
       ['Weighted pull-up',3,8,'Swim-specific vertical pull',false],
       ['Face pull',3,15,'Shoulder health under swim volume',false],
-      ['Pallof press',3,'12 ea','Anti-rotation core',false]
+      ['Pallof press',3,'12 ea','Anti-rotation core',false],
+      ['EZ-bar curl',3,10,'Biceps - heavier bilateral work',false]
     ]},
     upperB: { name:'Upper B (push + arms + core)', ex:[
       ['Flat DB press',3,8,'',false],
@@ -1479,7 +1481,8 @@
       ['Dips or close-grip bench',3,8,'',false],
       ['Lateral raise',3,12,'',false],
       ['Tricep pushdown',3,12,'',false],
-      ['Hanging leg raise',3,12,'',false]
+      ['Hanging leg raise',3,12,'',false],
+      ['Incline DB curl',3,10,'Biceps - balances the push/tricep day',false]
     ]},
     upperC: { name:'Upper C (pull + arms + core)', ex:[
       ['Lat pulldown',3,8,'',false],
@@ -1487,7 +1490,8 @@
       ['Straight-arm cable pulldown',3,12,'Mimics the swim pull-through',false],
       ['Hammer curl',3,12,'',false],
       ['Ab wheel rollout',3,10,'',false],
-      ['Side plank',3,'30s ea','',false]
+      ['Side plank',3,'30s ea','',false],
+      ['Overhead triceps extension',3,10,'Triceps - balances the pull/bicep day',false]
     ]}
   };
   var IM_LIFT_ORDER = ['legs','upperA','upperB','upperC'];
@@ -1882,13 +1886,13 @@
   // Back squat / T-bar row / Incline barbell press, and stamps T-bar row's
   // baseline at the cutover week so its first logged load becomes 100%.
   // All logged loads are preserved — removed exercises just stop appearing.
-  if(imState.liftsV !== 2){
+  if(imState.liftsV !== 3){
     if(imState.plan.lifts) imState.plan.lifts = clone(IM_LIFTS);
     if(imState.anchorBaseline['Back squat'] == null) imState.anchorBaseline['Back squat'] = 1;
     if(imState.anchorBaseline['Incline barbell press'] == null) imState.anchorBaseline['Incline barbell press'] = 1;
     imState.anchorBaseline['T-bar row'] = IM_LIFT_CUTOVER_WEEK;
     delete imState.anchorBaseline['Weighted pull-up'];
-    imState.liftsV = 2;
+    imState.liftsV = 3;
     imSave();
   }
 
