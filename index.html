@@ -1541,6 +1541,11 @@
 
   function imDietTables(){ return imState.plan.diet || IM_DIET; }
   function imLiftsData(){ return imState.plan.lifts || IM_LIFTS; }
+  // Session iteration order. A plan copied from the bodybuilding side can
+  // have any number of sessions, so the order travels with the stored plan.
+  function imLiftOrder(){
+    return (imState.plan.liftOrder && imState.plan.liftOrder.length) ? imState.plan.liftOrder : IM_LIFT_ORDER;
+  }
   function imTemplateData(){ return imState.plan.template || IM_TEMPLATE; }
   function imEditableDiet(){ if(!imState.plan.diet) imState.plan.diet = clone(IM_DIET); return imState.plan.diet; }
   function imEditableLifts(){ if(!imState.plan.lifts) imState.plan.lifts = clone(IM_LIFTS); return imState.plan.lifts; }
@@ -1764,7 +1769,7 @@
   function imWeekLifting(week){
     if(week < IM_LIFT_CUTOVER_WEEK) return null;
     if(week === 31) return null; // race week: lifting not prescribed at all
-    var target = (week === 30) ? 1 : 4;
+    var target = (week === 30) ? 1 : imLiftOrder().length;
     return { done: Math.min(imLiftSessionsDone(week), target), of: target };
   }
 
@@ -1880,19 +1885,37 @@
     imSave();
   }
 
-  // One-time (Sep 2026, week-6 cutover): lifting rewritten to four standalone
-  // sessions (Legs / Upper A / Upper B / Upper C). Replaces any in-app-edited
-  // stored copy (which shadows the defaults), re-points the anchor set to
-  // Back squat / T-bar row / Incline barbell press, and stamps T-bar row's
-  // baseline at the cutover week so its first logged load becomes 100%.
-  // All logged loads are preserved — removed exercises just stop appearing.
-  if(imState.liftsV !== 3){
-    if(imState.plan.lifts) imState.plan.lifts = clone(IM_LIFTS);
-    if(imState.anchorBaseline['Back squat'] == null) imState.anchorBaseline['Back squat'] = 1;
-    if(imState.anchorBaseline['Incline barbell press'] == null) imState.anchorBaseline['Incline barbell press'] = 1;
-    imState.anchorBaseline['T-bar row'] = IM_LIFT_CUTOVER_WEEK;
-    delete imState.anchorBaseline['Weighted pull-up'];
-    imState.liftsV = 3;
+  // One-time (Sep 2026): copy the LIVE bodybuilding lifting plan over to
+  // the Ironman side, per explicit request — a deliberate one-time read of
+  // the BB store (like the shared bodyweight), never a live link. Each
+  // non-rest BB training day with exercises becomes a standalone Ironman
+  // session; "4 x 6-8" schemes parse into sets/reps; exercises named like a
+  // current anchor keep their anchor flag and baseline. Afterward the two
+  // sides are edited independently. Waits for the BB store to exist (fresh
+  // devices run it right after the welcome choice).
+  if(imState.liftsV !== 4 && state){
+    var copiedLifts = {}, copiedOrder = [];
+    (state.training || []).forEach(function(day, di){
+      if(!day || day.rest || !day.ex || !day.ex.length) return;
+      var key = 's' + (di + 1);
+      var sessName = String(day.title || '').replace(/^Day\s*\d+\s*[\u2014\u2013-]\s*/i, '').trim() || ('Session ' + (copiedOrder.length + 1));
+      copiedLifts[key] = {
+        name: sessName,
+        ex: day.ex.map(function(pair){
+          var exName = String(pair[0] || 'Exercise');
+          var scheme = String(pair[1] || '3 x 8').replace(/\s+/g, ' ').trim();
+          var m = /^(\d+)\s*x\s*(.+)$/i.exec(scheme);
+          var anchor = imState.anchorBaseline[exName] != null;
+          return [exName, m ? parseInt(m[1], 10) : 3, m ? m[2] : scheme, '', anchor];
+        })
+      };
+      copiedOrder.push(key);
+    });
+    if(copiedOrder.length){
+      imState.plan.lifts = copiedLifts;
+      imState.plan.liftOrder = copiedOrder;
+    }
+    imState.liftsV = 4;
     imSave();
   }
 
@@ -4468,7 +4491,7 @@
   function renderImLiftsEditor(){
     var data = imEditableLifts();
     var html = '<div class="card-sub" style="margin-bottom:.8rem;">Rename sessions and exercises, change sets/reps or the note, or tap A to mark an anchor lift (anchors keep full sets and load from week 21 on). Renaming an exercise starts a fresh load history for it. Past weeks keep the adherence they were scored with.</div>';
-    IM_LIFT_ORDER.forEach(function(k){
+    imLiftOrder().forEach(function(k){
       var s = data[k];
       if(!s) return;
       html += '<div class="card" style="padding-bottom:.7rem;">';
@@ -4604,7 +4627,7 @@
 
     var liftsData = imLiftsData();
     var sessNow = imState.sess[wk] || { done:{}, ex:{} };
-    var keys = (wk === 30) ? ['upperA'] : IM_LIFT_ORDER;
+    var keys = (wk === 30) ? [imLiftOrder()[0]] : imLiftOrder();
     keys.forEach(function(k){
       var s = liftsData[k];
       if(!s) return;
@@ -4855,7 +4878,7 @@
   // renaming or re-flagging anchors on the Lifts tab carries through here.
   function imAnchorNames(){
     var names = [], data = imLiftsData();
-    IM_LIFT_ORDER.forEach(function(k){
+    imLiftOrder().forEach(function(k){
       var s = data[k];
       if(s) s.ex.forEach(function(ex){ if(ex[4]) names.push(ex[0]); });
     });
@@ -4920,7 +4943,11 @@
     html += '<div class="section-title">Anchor lifts vs baseline</div>';
     var warns = [];
     var anchorHtml = '';
-    imAnchorNames().forEach(function(name){
+    var anchorNames = imAnchorNames();
+    if(!anchorNames.length){
+      html += '<div class="card"><div class="empty-hint">No anchor lifts flagged. Tap Edit on the Lifts tab and mark 1-3 key lifts with the A button — they become your strength-loss early-warning system.</div></div>';
+    }
+    anchorNames.forEach(function(name){
       var loads = imState.liftLoads[name] || {};
       // only track from the week this exercise became an anchor — loads
       // logged before that (as an accessory, or a different lift) are not
