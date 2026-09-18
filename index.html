@@ -1507,27 +1507,27 @@
   // of a recovery week (overrides the others). Taper weeks use the Phase C
   // tables. Each meal: [name, foods, P, C, F]; kcal is always computed from
   // the summed raw macros (P*4 + C*4 + F*9) — never per-meal-rounded-then-summed.
-  // One plan for every day type (set Sep 2026): 2,300 kcal target /
-  // 225P / 70F spec — entered verbatim; the app computes the real totals
-  // from the summed raw macros (P*4 + C*4 + F*9), never per-meal-rounded.
-  // Each day-type key gets its own clone so the in-app editor can still
-  // diverge them later.
-  var IM_MEALS_2300 = [
-    ['1 Breakfast','200g egg whites, 100g whole eggs, 35g dry oats, 80g blueberries, 18g peanut butter',44,41,21],
-    ['2 Lunch','200g chicken breast (raw weight), 110g cooked jasmine rice, 150g cucumber, 8g olive oil',50,36,11],
+  // One plan for every day type. Revised 2026-09-18 (volumes-only cut;
+  // post-lift is whey only, its rice folded into lunch). Entered verbatim;
+  // the app computes the real totals from the summed raw macros
+  // (P*4 + C*4 + F*9), never per-meal-rounded. Each day-type key gets its
+  // own clone so the in-app editor can still diverge them later.
+  var IM_MEALS_DEFAULT = [
+    ['1 Breakfast','220g egg whites, 80g whole eggs, 50g dry oats, 70g blueberries, 14g peanut butter',45,49,19],
+    ['2 Lunch','210g chicken breast (raw weight), 70g cooked jasmine rice, 150g cucumber, 7g olive oil',51,25,11],
     ['3 Pre-lift','1 scoop whey protein, 1 banana (100g)',26,26,1],
-    ['4 Post-lift','1 scoop whey protein, 80g cooked jasmine rice',27,25,1],
-    ['5 Dinner','180g 96/4 lean ground beef (raw weight), 150g baked sweet potato, 150g Brussels sprouts, 9g olive oil',45,44,17],
-    ['6 Before bed','250g nonfat Greek yogurt, 30g almonds, 100g strawberries',32,23,16]
+    ['4 Post-lift','1 scoop whey protein',25,3,1],
+    ['5 Dinner','190g 96/4 lean ground beef (raw weight), 100g baked sweet potato, 150g Brussels sprouts, 8g olive oil',47,34,16],
+    ['6 Before bed','250g nonfat Greek yogurt, 28g almonds, 100g strawberries',32,23,15]
   ];
   var IM_DIET = {
-    A_standard: clone(IM_MEALS_2300),
-    A_long: clone(IM_MEALS_2300),
-    B_standard: clone(IM_MEALS_2300),
-    B_long: clone(IM_MEALS_2300),
-    C_standard: clone(IM_MEALS_2300),
-    C_long: clone(IM_MEALS_2300),
-    recovery: clone(IM_MEALS_2300)
+    A_standard: clone(IM_MEALS_DEFAULT),
+    A_long: clone(IM_MEALS_DEFAULT),
+    B_standard: clone(IM_MEALS_DEFAULT),
+    B_long: clone(IM_MEALS_DEFAULT),
+    C_standard: clone(IM_MEALS_DEFAULT),
+    C_long: clone(IM_MEALS_DEFAULT),
+    recovery: clone(IM_MEALS_DEFAULT)
   };
 
   // Target bodyweight (lb) per week, 1..31.
@@ -1871,9 +1871,9 @@
   // day types. An in-app-edited copy shadows the defaults forever, so it
   // must be replaced too — later edits are safe, this runs exactly once.
   // Frozen day snapshots keep past adherence exactly as it was scored.
-  if(imState.dietV !== 2300){
+  if(imState.dietV !== 2103){
     if(imState.plan.diet) imState.plan.diet = clone(IM_DIET);
-    imState.dietV = 2300;
+    imState.dietV = 2103;
     imSave();
   }
 
