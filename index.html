@@ -1507,16 +1507,16 @@
   // of a recovery week (overrides the others). Taper weeks use the Phase C
   // tables. Each meal: [name, foods, P, C, F]; kcal is always computed from
   // the summed raw macros (P*4 + C*4 + F*9) — never per-meal-rounded-then-summed.
-  // One plan for every day type. Revised 2026-09-18 (volumes-only cut;
-  // post-lift is whey only, its rice folded into lunch). Entered verbatim;
+  // One plan for every day type. Revised 2026-09-18 pm (meal 4 renamed
+  // Mid-afternoon, whey swapped for chicken; lunch chicken up). Entered verbatim;
   // the app computes the real totals from the summed raw macros
   // (P*4 + C*4 + F*9), never per-meal-rounded. Each day-type key gets its
   // own clone so the in-app editor can still diverge them later.
   var IM_MEALS_DEFAULT = [
     ['1 Breakfast','220g egg whites, 80g whole eggs, 50g dry oats, 70g blueberries, 14g peanut butter',45,49,19],
-    ['2 Lunch','210g chicken breast (raw weight), 70g cooked jasmine rice, 150g cucumber, 7g olive oil',51,25,11],
+    ['2 Lunch','230g chicken breast (raw weight), 70g cooked jasmine rice, 150g cucumber, 7g olive oil',56,25,11],
     ['3 Pre-lift','1 scoop whey protein, 1 banana (100g)',26,26,1],
-    ['4 Post-lift','1 scoop whey protein',25,3,1],
+    ['4 Mid-afternoon','230g chicken breast (raw weight)',53,0,4],
     ['5 Dinner','190g 96/4 lean ground beef (raw weight), 100g baked sweet potato, 150g Brussels sprouts, 8g olive oil',47,34,16],
     ['6 Before bed','250g nonfat Greek yogurt, 28g almonds, 100g strawberries',32,23,15]
   ];
@@ -1871,9 +1871,9 @@
   // day types. An in-app-edited copy shadows the defaults forever, so it
   // must be replaced too — later edits are safe, this runs exactly once.
   // Frozen day snapshots keep past adherence exactly as it was scored.
-  if(imState.dietV !== 2103){
+  if(imState.dietV !== 2246){
     if(imState.plan.diet) imState.plan.diet = clone(IM_DIET);
-    imState.dietV = 2103;
+    imState.dietV = 2246;
     imSave();
   }
 
