@@ -1523,18 +1523,18 @@
   // of a recovery week (overrides the others). Taper weeks use the Phase C
   // tables. Each meal: [name, foods, P, C, F]; kcal is always computed from
   // the summed raw macros (P*4 + C*4 + F*9) — never per-meal-rounded-then-summed.
-  // One plan for every day type. Revised 2026-09-19 (meal 4 back to
-  // Post-lift whey-only; 2026-09-21: lunch rice up to 120g). Entered verbatim;
+  // One plan for every day type. 2026-10-07: mirrors the bodybuilding meal
+  // plan (macros computed from its FOOD_DB per-100g values, raw chicken);
   // the app computes the real totals from the summed raw macros
   // (P*4 + C*4 + F*9), never per-meal-rounded. Each day-type key gets its
   // own clone so the in-app editor can still diverge them later.
   var IM_MEALS_DEFAULT = [
-    ['1 Breakfast','220g egg whites, 80g whole eggs, 50g dry oats, 70g blueberries, 14g peanut butter',45,49,19],
-    ['2 Lunch','220g chicken breast (raw weight), 120g cooked jasmine rice, 150g cucumber, 7g olive oil',55,39,11],
-    ['3 Pre-lift','1 scoop whey protein, 1 banana (100g)',26,26,1],
-    ['4 Post-lift','1 scoop whey protein',25,3,1],
-    ['5 Dinner','230g chicken breast (raw weight), 100g baked sweet potato, 150g Brussels sprouts, 10g olive oil',59,34,14],
-    ['6 Before bed','250g nonfat Greek yogurt, 28g almonds, 100g strawberries',32,23,15]
+    ['1 Breakfast','170g egg whites, 90g whole eggs, 80g dry oats, 150g blueberries, 24g peanut butter',47,83,27],
+    ['2 Lunch','160g chicken breast (raw weight), 180g cooked jasmine rice, 150g cucumber, 6g olive oil',42,56,11],
+    ['3 Mid-afternoon','160g chicken breast (raw weight), 100g baked sweet potato, 150g Brussels sprouts, 5g olive oil',42,31,10],
+    ['4 Pre-workout','1 scoop whey protein',25,3,1],
+    ['5 Post-workout / Dinner','150g chicken breast (raw weight), 185g cooked jasmine rice, 12g olive oil',39,52,16],
+    ['6 Before bed','200g nonfat Greek yogurt, 30g almonds, 120g strawberries',28,23,16]
   ];
   var IM_DIET = {
     A_standard: clone(IM_MEALS_DEFAULT),
@@ -1887,9 +1887,9 @@
   // day types. An in-app-edited copy shadows the defaults forever, so it
   // must be replaced too — later edits are safe, this runs exactly once.
   // Frozen day snapshots keep past adherence exactly as it was scored.
-  if(imState.dietV !== 2207){
+  if(imState.dietV !== 2614){
     if(imState.plan.diet) imState.plan.diet = clone(IM_DIET);
-    imState.dietV = 2207;
+    imState.dietV = 2614;
     imSave();
   }
 
