@@ -722,21 +722,21 @@
 
   var DEFAULT_MEALS = [
     { id:1, name:"Meal 1", sub:"Breakfast", items:[
-      ing("Egg whites", 180, "g"),
+      ing("Egg whites", 170, "g"),
       ing("Whole eggs", 90, "g"),
-      ing("Dry oats", 40, "g"),
-      ing("Blueberries", 100, "g"),
-      ing("Peanut butter", 16, "g")
+      ing("Dry oats", 80, "g"),
+      ing("Blueberries", 150, "g"),
+      ing("Peanut butter", 24, "g")
     ]},
     { id:2, name:"Meal 2", sub:"Lunch", items:[
-      ing("Chicken breast, cooked", 160, "g"),
-      ing("Jasmine rice, cooked", 70, "g"),
+      ing("Chicken breast, raw", 160, "g"),
+      ing("Jasmine rice, cooked", 180, "g"),
       ing("Cucumber", 150, "g"),
       ing("Olive oil", 6, "g")
     ]},
     { id:3, name:"Meal 3", sub:"Mid-Afternoon", items:[
-      ing("Chicken breast, cooked", 160, "g"),
-      ing("Sweet potato, baked", 180, "g"),
+      ing("Chicken breast, raw", 160, "g"),
+      ing("Sweet potato, baked", 100, "g"),
       ing("Brussels sprouts, cooked", 150, "g"),
       ing("Olive oil", 5, "g")
     ]},
@@ -744,14 +744,14 @@
       ingManual("1 scoop whey protein", 25, 3, 1)
     ]},
     { id:5, name:"Meal 5", sub:"Post-Workout / Dinner", items:[
-      ing("Lean ground beef 96/4, cooked", 160, "g"),
-      ing("Jasmine rice, cooked", 50, "g"),
-      ing("Olive oil", 8, "g")
+      ing("Chicken breast, raw", 150, "g"),
+      ing("Jasmine rice, cooked", 185, "g"),
+      ing("Olive oil", 12, "g")
     ]},
     { id:6, name:"Meal 6", sub:"Before Bed", items:[
       ing("Nonfat Greek yogurt", 200, "g"),
       ing("Almonds", 30, "g"),
-      ing("Strawberries", 80, "g")
+      ing("Strawberries", 120, "g")
     ]}
   ];
 
@@ -1253,6 +1253,22 @@
       s.dedupeV = 1;
     }
     if(!s.meals) s.meals = clone(DEFAULT_MEALS);
+    // mealsV 2 (Oct 2026): the meal plan was replaced wholesale — swap the
+    // saved plan for the new default once. Daily records and adherence
+    // snapshots are frozen facts and are not touched.
+    if(s.mealsV !== 2){
+      s.meals = clone(DEFAULT_MEALS);
+      // every food in the new plan is in the built-in table — resolve
+      // synchronously so totals are right on the very first render
+      s.meals.forEach(function(m){
+        m.items.forEach(function(it){
+          if(it.mode !== "auto") return;
+          var b = matchBuiltin(it.food);
+          if(b){ it.per100 = { p:b.p, c:b.c, f:b.f }; it.matchDesc = b.name; it.status = "ok"; }
+        });
+      });
+      s.mealsV = 2;
+    }
     s.meals = migrateMeals(s.meals);
     // engine v2 = built-in table + Open Food Facts. Re-resolve every auto
     // ingredient once so matches picked by the old USDA engine get replaced.
@@ -1946,7 +1962,7 @@
 
   function exampleState(){
     return {
-      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1, dedupeV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1, dedupeV:1, mealsV:2,
       weights: SEED_WEIGHTS.map(function(w){ return {date:w[0], weight:w[1]}; }),
       meals: clone(DEFAULT_MEALS),
       training: clone(DEFAULT_TRAINING),
@@ -1962,7 +1978,7 @@
       training.push({ day:d, title:"Day "+d, focus: d===7 ? "Rest" : "Tap Edit to set up", rest: d===7, ex:[] });
     }
     return {
-      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1, dedupeV:1,
+      daily:{}, snapshots:{}, snapshotsBackfilled:true, exerciseLog:{}, weekLog:{}, stepGoal:10000, cardioGoal:5, blockStart: todayStr(), engineV:2, splitV:2, liftV:1, dedupeV:1, mealsV:2,
       weights: [],
       meals: meals,
       training: training,
